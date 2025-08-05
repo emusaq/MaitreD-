@@ -10,3 +10,5 @@ pyngrok
 mcp
 openai-agents
 psycopg
+
+#raw list of dependencies in env
