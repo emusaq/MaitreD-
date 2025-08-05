@@ -1,53 +1,57 @@
-from typing import List, Tuple, Optional
-from database.connection import connect
+from typing import List, Optional
+from sqlalchemy.orm import Session
+
+from models.models import SessionLocal, Restaurant
 
 
-def list_restaurants() -> List[Tuple]:
+def list_restaurants(db: Session = SessionLocal()) -> List[Restaurant]:
     """Return a list of all restaurants."""
-    with connect() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT restaurant_id, name, location FROM Restaurants ORDER BY name")
-        return cur.fetchall()
+    return db.query(Restaurant).order_by(Restaurant.name).all()
 
 
-def get_restaurant_by_id(restaurant_id: int) -> Optional[Tuple]:
+def get_restaurant_by_id(
+    restaurant_id: int, db: Session = SessionLocal()
+) -> Optional[Restaurant]:
     """Return a restaurant by ID."""
-    with connect() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM Restaurants WHERE restaurant_id = %s", (restaurant_id,))
-        return cur.fetchone()
+    return db.get(Restaurant, restaurant_id)
 
 
-def create_restaurant(name: str, location: Optional[str] = None) -> int:
+def create_restaurant(
+    name: str,
+    location: Optional[str] = None,
+    db: Session = SessionLocal()
+) -> int:
     """Create a new restaurant and return its ID."""
-    with connect() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO Restaurants (name, location) VALUES (%s, %s) RETURNING restaurant_id",
-            (name, location)
-        )
-        new_id = cur.fetchone()[0]
-        conn.commit()
-        return new_id
+    new_restaurant = Restaurant(name=name, location=location)
+    db.add(new_restaurant)
+    db.commit()
+    db.refresh(new_restaurant)
+    return new_restaurant.restaurant_id
 
 
-def update_restaurant(restaurant_id: int, name: str, location: Optional[str]) -> bool:
+def update_restaurant(
+    restaurant_id: int,
+    name: str,
+    location: Optional[str],
+    db: Session = SessionLocal()
+) -> bool:
     """Update the name and/or location of a restaurant."""
-    with connect() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            "UPDATE Restaurants SET name = %s, location = %s WHERE restaurant_id = %s",
-            (name, location, restaurant_id)
-        )
-        conn.commit()
-        return cur.rowcount > 0
+    restaurant = get_restaurant_by_id(restaurant_id, db)
+    if restaurant:
+        restaurant.name = name
+        restaurant.location = location
+        db.commit()
+        return True
+    return False
 
 
-def delete_restaurant(restaurant_id: int) -> bool:
+def delete_restaurant(
+    restaurant_id: int, db: Session = SessionLocal()
+) -> bool:
     """Delete a restaurant by ID."""
-    with connect() as conn:
-        cur = conn.cursor()
-        cur.execute("DELETE FROM Restaurants WHERE restaurant_id = %s", (restaurant_id,))
-        conn.commit()
-        return cur.rowcount > 0
-
+    restaurant = get_restaurant_by_id(restaurant_id, db)
+    if restaurant:
+        db.delete(restaurant)
+        db.commit()
+        return True
+    return False

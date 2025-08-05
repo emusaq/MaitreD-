@@ -2,6 +2,8 @@ from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import declarative_base, sessionmaker
 from decouple import config
+from sqlalchemy import Text, Date, DateTime, Boolean, ForeignKey, func
+from sqlalchemy.orm import relationship
 
 url = URL.create(
     drivername ="postgresql",
@@ -25,6 +27,84 @@ class Conversation(Base):
     response = Column(String)
 
 
-Base.metadata.create_all(engine)
+## ORM models based on raw schema for Clients, Restaurants, Employees, History, and Notes
 
-## saved as conversations.py in MaitreD'
+# Client model
+class Client(Base):
+    __tablename__ = "clients"
+
+    client_id = Column(Integer, primary_key=True, index=True)
+    first_name = Column(Text, nullable=False)
+    last_name = Column(Text, nullable=False)
+    phone_number = Column(Text, unique=True, nullable=False)
+    email = Column(Text, unique=True)
+    client_summary = Column(Text)
+    ai_summary = Column(Text)
+    birthday = Column(Date)
+    preferred_seating = Column(Text)
+    preferred_server = Column(Text)
+    preferred_communication = Column(Text)
+    last_visit = Column(DateTime)
+    allow_marketing = Column(Boolean, default=True)
+    date_created = Column(Date, default=func.current_date())
+
+    histories = relationship("History", back_populates="client")
+    notes = relationship("Note", back_populates="client")
+
+# Restaurant model
+class Restaurant(Base):
+    __tablename__ = "restaurants"
+
+    restaurant_id = Column(Integer, primary_key=True, index=True)
+    name = Column(Text, nullable=False)
+    location = Column(Text)
+
+    histories = relationship("History", back_populates="restaurant")
+
+# Employee model
+class Employee(Base):
+    __tablename__ = "employees"
+
+    employee_id = Column(Integer, primary_key=True, index=True)
+    first_name = Column(Text, nullable=False)
+    last_name = Column(Text, nullable=False)
+    role = Column(Text, nullable=False)
+    access_code = Column(Integer, nullable=False)
+    username = Column(Text, unique=True)
+    password = Column(Text)
+
+    histories = relationship("History", back_populates="employee")
+    notes = relationship("Note", back_populates="employee")
+
+# History model
+class History(Base):
+    __tablename__ = "history"
+
+    history_id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.client_id"), nullable=False)
+    restaurant_id = Column(Integer, ForeignKey("restaurants.restaurant_id"))
+    employee_id = Column(Integer, ForeignKey("employees.employee_id"))
+    items_ordered = Column(Text)
+    visit_date = Column(DateTime, default=func.current_timestamp())
+
+    client = relationship("Client", back_populates="histories")
+    restaurant = relationship("Restaurant", back_populates="histories")
+    employee = relationship("Employee", back_populates="histories")
+    notes = relationship("Note", back_populates="history")
+
+# Note model
+class Note(Base):
+    __tablename__ = "notes"
+
+    note_id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.client_id"), nullable=False)
+    history_id = Column(Integer, ForeignKey("history.history_id"))
+    employee_id = Column(Integer, ForeignKey("employees.employee_id"))
+    note_text = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=func.current_timestamp())
+
+    client = relationship("Client", back_populates="notes")
+    history = relationship("History", back_populates="notes")
+    employee = relationship("Employee", back_populates="notes")
+
+Base.metadata.create_all(engine)

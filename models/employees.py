@@ -1,113 +1,74 @@
-from typing import List, Tuple, Optional
-from database.connection import connect
+from typing import List, Optional
+import secrets
+from sqlalchemy.orm import Session
 
-"""
-Employee model - CRUD helpers for the Employees table.
-"""
-
-#employee schema 
-"""
-CREATE TABLE IF NOT EXISTS Employees (
-    employee_id  SERIAL PRIMARY KEY,
-    first_name   TEXT NOT NULL,
-    last_name    TEXT NOT NULL,
-    role         TEXT NOT NULL CHECK (role IN ('server', 'manager', 'owner')),
-    access_code  INTEGER NOT NULL CHECK (access_code BETWEEN 1000 AND 9999),
-    username     TEXT UNIQUE,
-    password     TEXT
-);
-"""
-
-def list_employees() -> List[Tuple]:
-    # Return a list of all employees
-    with connect() as conn:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT employee_id,
-                   first_name,
-                   last_name,
-                   role,
-                   access_code,
-                   username
-            FROM Employees
-            ORDER BY last_name
-        """)
-        return cur.fetchall()
-
-def get_employee_by_id(employee_id) -> Optional[Tuple]:
-    # return a list of all employees
-    with connect() as conn:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT *
-            FROM Employees
-            WHERE employee_id = %s
-        """, (employee_id,))
-        return cur.fetchone()
-
-def get_employee_by_name(employee_first_name, employee_last_name) -> Optional[tuple]:
-     # return an employee by name
-     with connect() as conn:
-         cur = conn.cursor()
-         cur.execute("""
-            SELECT * FROM Employees 
-            WHERE first_name = %s AND last_name = %s
-        """,(employee_first_name, employee_last_name))
-         return cur.fetchone()
+from models.models import SessionLocal, Employee
 
 
-# Update an employee's role based on an integer code (1=server, 2=manager, 3=owner)
-def update_employee_role(employee_id: int, role_code: int) -> None:
-    role_map = {
-        1: 'server',
-        2: 'manager',
-        3: 'owner'
-    }
-    if role_code not in role_map:
-        raise ValueError("Invalid role code. Must be 1 (server), 2 (manager), or 3 (owner).")
-    new_role = role_map[role_code]
+def list_employees(db: Session = SessionLocal()) -> List[Employee]:
+    """Return a list of all employees."""
+    return db.query(Employee).order_by(Employee.last_name).all()
 
-    with connect() as conn:
-        cur = conn.cursor()
-        cur.execute("""
-            UPDATE Employees
-            SET role = %s
-            WHERE employee_id = %s
-        """, (new_role, employee_id))
-        conn.commit()
 
-def delete_employee(employee_id) -> bool:
-    # delete the employee by id
-    with connect() as conn:
-        cur = conn.cursor()
-        cur.execute("DELETE FROM Employees WHERE employee_id = %s", (employee_id,))
-        conn.commit()
-        return cur.rowcount > 0
-    
+def get_employee_by_id(employee_id: int, db: Session = SessionLocal()) -> Optional[Employee]:
+    """Return an employee by id."""
+    return db.get(Employee, employee_id)
+
+
+def get_employee_by_name(
+    first_name: str, last_name: str, db: Session = SessionLocal()
+) -> Optional[Employee]:
+    """Return an employee by first and last name."""
+    return (
+        db.query(Employee)
+        .filter_by(first_name=first_name, last_name=last_name)
+        .first()
+    )
+
+
+def update_employee_role(
+    employee_id: int, role: str, db: Session = SessionLocal()
+) -> bool:
+    """Update an employee's role."""
+    employee = get_employee_by_id(employee_id, db)
+    if employee:
+        employee.role = role
+        db.commit()
+        return True
+    return False
+
+
+def delete_employee(employee_id: int, db: Session = SessionLocal()) -> bool:
+    """Delete the employee by id."""
+    employee = get_employee_by_id(employee_id, db)
+    if employee:
+        db.delete(employee)
+        db.commit()
+        return True
+    return False
+
+
 def create_employee(
-        first_name: str,
-        last_name: str,
-        role: int,
-        password: str,
+    first_name: str,
+    last_name: str,
+    role: str,
+    password: str,
+    access_code: Optional[int] = None,
+    db: Session = SessionLocal()
 ) -> int:
-    import secrets  # cryptographically secure random numbers
-    role_map = {1: 'server', 2: 'manager', 3: 'owner'}
-    # TODO: consider hashing/storing passwords securely (e.g., bcrypt)
-    access_code = secrets.randbelow(9000) + 1000  # range 1000–9999
-    
-    if role not in role_map:
-        raise ValueError("Invalid role code. Must be 1, 2, 3")
-
+    """Create a new employee and return their employee_id."""
+    if access_code is None:
+        access_code = secrets.randbelow(9000) + 1000
     username = f"{first_name[0].lower()}{last_name.lower()}{access_code}"
-    role_text = role_map[role]
-
-    with connect() as conn:
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO Employees (first_name, last_name, role, access_code, username, password)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            returning employee_id
-        """,(first_name, last_name, role_text, access_code, username, password))
-        employee_id = cur.fetchone()[0]
-        conn.commit()
-        return employee_id
+    new_employee = Employee(
+        first_name=first_name,
+        last_name=last_name,
+        role=role,
+        access_code=access_code,
+        username=username,
+        password=password
+    )
+    db.add(new_employee)
+    db.commit()
+    db.refresh(new_employee)
+    return new_employee.employee_id

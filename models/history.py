@@ -1,54 +1,45 @@
-from typing import List, Tuple, Optional
-from database.connection import connect
+from typing import List, Optional
+from sqlalchemy.orm import Session, joinedload
 
-"""
-CREATE TABLE IF NOT EXISTS History (
-    history_id     SERIAL PRIMARY KEY,
-    client_id      INTEGER NOT NULL,
-    restaurant_id  INTEGER,
-    employee_id      INTEGER,
-    items_ordered  TEXT
-    visit_date     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (client_id) REFERENCES Clients(client_id) ON DELETE CASCADE,
-    FOREIGN KEY (restaurant_id) REFERENCES Restaurants(restaurant_id) ON DELETE SET NULL,
-    FOREIGN KEY (employee_id) REFERENCES Employees(employee_id) ON DELETE SET NULL
-);
-"""
+from models.models import SessionLocal, History, Note
 
-def get_client_history (client_id: int) -> list[Tuple]:
-    with connect() as conn:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT 
-                History.history_id,
-                History.visit_date,
-                Histoy.employee_id
-                Notes.note_text,
-                Notes.created_at
-            FROM History
-            LEFT JOIN Notes ON History.history_id = Notes.history_id
-            WHERE History.client_id = %s
-            ORDER BY History.visit_date DESC
-        """(client_id,))    
-    return cur.fetchall()
 
-def add_visit(client_id: int, employee_id: int, items_ordered: str, note_text: Optional[str] = None):
-    with connect() as conn:
-        cur = conn.cursor()
+def get_client_history(
+    client_id: int, db: Session = SessionLocal()
+) -> List[History]:
+    """Return history records for a client, including related notes."""
+    return (
+        db.query(History)
+        .options(joinedload(History.notes))
+        .filter_by(client_id=client_id)
+        .order_by(History.visit_date.desc())
+        .all()
+    )
 
-        # Insert into History table
-        cur.execute("""
-            INSERT INTO History (client_id, employee_id, items_ordered)
-            VALUES (%s, %s, %s)
-            RETURNING history_id
-        """, (client_id, employee_id, items_ordered))
-        history_id = cur.fetchone()[0]
 
-        # If note text is provided, insert into Notes table
-        if note_text:
-            cur.execute("""
-                INSERT INTO Notes (client_id, history_id, employee_id, note_text)
-                VALUES (%s, %s, %s, %s)
-            """, (client_id, history_id, employee_id, note_text))
-
-        conn.commit()
+def add_visit(
+    client_id: int,
+    employee_id: Optional[int],
+    items_ordered: str,
+    note_text: Optional[str] = None,
+    db: Session = SessionLocal()
+) -> int:
+    """Add a visit record and optional note, returning the history_id."""
+    new_visit = History(
+        client_id=client_id,
+        employee_id=employee_id,
+        items_ordered=items_ordered
+    )
+    db.add(new_visit)
+    db.commit()
+    db.refresh(new_visit)
+    if note_text:
+        new_note = Note(
+            client_id=client_id,
+            history_id=new_visit.history_id,
+            employee_id=employee_id,
+            note_text=note_text
+        )
+        db.add(new_note)
+        db.commit()
+    return new_visit.history_id
