@@ -11,6 +11,14 @@ SCHEMA_SQL = """
 CREATE SCHEMA IF NOT EXISTS public;
 SET search_path TO public;
 
+CREATE TABLE IF NOT EXISTS conversations (
+    id      INTEGER PRIMARY KEY,
+    sender  VARCHAR(255),
+    message TEXT,
+    response TEXT,
+    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 
 CREATE TABLE IF NOT EXISTS Clients (
     client_id         SERIAL PRIMARY KEY,
