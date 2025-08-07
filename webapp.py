@@ -5,8 +5,9 @@ from decouple import config
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+
 # Internal imports
-from models import Conversation, SessionLocal
+from models.models import Conversation, SessionLocal
 from utils import send_message, logger
 
 
@@ -41,11 +42,22 @@ async def reply(request: Request, Body: str = Form(), db: Session = Depends(get_
 
         print(f"Sending the ChatGPT response to this number: {whatsapp_number}")
 
-        # Prepare messages for OpenAI
-        messages = [
-            {"role": "system", "content": "You're a receptionist and in charge of customer experience at a high end argentinean restaurant called garufa, you make reservations and answer customer questions."},
-            {"role": "user", "content": body_text}
-        ]
+        # Prepare conversation context for OpenAI
+        system_msg = {"role": "system", "content": "You're a receptionist and in charge of customer experience at a high end argentinean restaurant called garufa, you make reservations and answer customer questions."}
+
+        # Retrieve the last 3 conversation exchanges for this sender
+        from models.models import Conversation
+        history = db.query(Conversation).filter(Conversation.sender == whatsapp_number).order_by(Conversation.created_at.desc()).limit(3).all()
+        history_msgs = []
+        if history:
+            # Reverse to maintain chronological order
+            history = list(reversed(history))
+            for convo in history:
+                history_msgs.append({"role": "user", "content": convo.message})
+                history_msgs.append({"role": "assistant", "content": convo.response})
+
+        # Compose the full message list with system prompt, conversation history, then the new user message
+        messages = [system_msg] + history_msgs + [{"role": "user", "content": body_text}]
 
         try:
             response = client.chat.completions.create(

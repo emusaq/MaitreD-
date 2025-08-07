@@ -5,19 +5,19 @@ from sqlalchemy.orm import Session
 from models.models import SessionLocal, Client
 
 
-def list_clients(db: Session = SessionLocal()) -> List[Client]:
+def list_clients(db: Session) -> List[Client]:
     """Return a list of all clients."""
     return db.query(Client).order_by(Client.last_name, Client.first_name).all()
 
 
-def get_client_by_id(client_id: int, db: Session = SessionLocal()) -> Optional[Client]:
+def get_client_by_id(client_id: int, db: Session) -> Optional[Client]:
     """Return client by id."""
     return db.get(Client, client_id)
 
 
 def get_client_by_name(
-    first_name: str, last_name: str, db: Session = SessionLocal()
-) -> Optional[Client]:
+    first_name: str, last_name: str, db: Session
+    ) -> Optional[Client]:
     """Return a client row by first and last name."""
     return (
         db.query(Client)
@@ -26,7 +26,7 @@ def get_client_by_name(
     )
 
 
-def get_client_by_phone(phone_number: str, db: Session = SessionLocal()) -> Optional[Client]:
+def get_client_by_phone(phone_number: str, db: Session) -> Optional[Client]:
     """Return client row by phone number."""
     return db.query(Client).filter_by(phone_number=phone_number).first()
 
@@ -41,7 +41,7 @@ def create_client(
     preferred_server: Optional[str] = None,
     preferred_communication: Optional[str] = None,
     allow_marketing: bool = True,
-    db: Session = SessionLocal()
+    db = Session
 ) -> int:
     """Create a client and return their client_id."""
     new_client = Client(
@@ -62,7 +62,7 @@ def create_client(
 
 
 def update_client_summary(
-    client_id: int, summary: str, db: Session = SessionLocal()
+    client_id: int, summary: str, db: Session
 ) -> bool:
     """Update the summary note for a client."""
     client = get_client_by_id(client_id, db)
@@ -72,8 +72,18 @@ def update_client_summary(
         return True
     return False
 
+def get_or_create_client_id(db: Session, client_name: str) -> int:
+    names = client_name.split()
+    first_name = names[0]
+    last_name = " ".join(names[1:]) if len(names) > 1 else ""
+    client = get_client_by_name(first_name, last_name, db)
+    if client:
+        return client.client_id
+    dummy_phone = "000" + str(abs(hash(client_name)) % 10000000000)
+    return create_client(first_name, last_name, dummy_phone, db=db)
 
-def update_last_visit(client_id: int, db: Session = SessionLocal()) -> bool:
+
+def update_last_visit(client_id: int, db: Session) -> bool:
     """Update the last visit to current timestamp."""
     client = get_client_by_id(client_id, db)
     if client:

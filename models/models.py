@@ -10,8 +10,8 @@ url = URL.create(
     username=config("DB_USER"),
     password=config("DB_PASSWORD"),
     host="localhost",
-    database="mydb",
-    port=5432
+    database="maitred",
+    port=5433
 )
 
 engine = create_engine(url)
@@ -25,6 +25,7 @@ class Conversation(Base):
     sender = Column(String)
     message = Column(String)
     response = Column(String)
+    created_at = Column(DateTime, default=func.current_timestamp())
 
 
 ## ORM models based on raw schema for Clients, Restaurants, Employees, History, and Notes
