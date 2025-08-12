@@ -5,6 +5,7 @@ from decouple import config
 from sqlalchemy import Text, Date, DateTime, Boolean, ForeignKey, func
 from sqlalchemy.orm import relationship
 
+#connection to maitred postgresql database
 url = URL.create(
     drivername ="postgresql",
     username=config("DB_USER"),
