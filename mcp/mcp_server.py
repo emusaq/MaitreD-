@@ -3,7 +3,9 @@ from manage import app, get_db
 from agents.mcp import mcp_server_fastapi
 from sqlalchemy.orm import Session
 from fastapi import Depends
-import models
+
+from models import client as client_model
+from models import reservations as reservation_model
 
 server = mcp_server_fastapi(app, name="maitred-mcp")
 
@@ -14,7 +16,16 @@ class UpsertReservationIn(BaseModel):
     # Either an existing client_id OR a client_name for new/unknown clients
     client_id: int | None = None
     client_name: str | None = None
-    special_request: str | None = None
+    special_requests: str | None = None
+    occasion: str | None = None
+    seating: str | None = None
+    dietary: str | None = None
+    source: str | None = None
+    language_guess: str | None = None
+    parsed_party_size: int | None = None
+    parsed_date: str | None = None
+    parsed_time: str | None = None
+    created_by_bot: bool = False
 
     @root_validator
     def client_reference_required(cls, values):
@@ -36,7 +47,7 @@ async def upsert_reservation(
 ):
     # Resolve or create client when only a name is supplied
     if data.client_id is None:
-        data.client_id = models.get_or_create_client_id(db, data.client_name)
+        data.client_id = client_model.get_or_create_client_id(data.client_name)
 
     payload = data.dict(exclude={"client_name"})
-    return models.upsert_reservation(db=db, **payload)
+    return reservation_model.upsert_reservation(**payload)

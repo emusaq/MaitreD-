@@ -1,4 +1,3 @@
-# Third-party imports
 from openai import OpenAI, OpenAIError, RateLimitError
 from fastapi import FastAPI, Form, Depends, Request
 from decouple import config
@@ -7,8 +6,9 @@ from sqlalchemy.orm import Session
 
 # Internal imports
 from models import Conversation, SessionLocal
+from models import client as client_model
+from models import reservations as reservation_model
 from utils import send_message, logger
-
 
 app = FastAPI()
 # Set up the OpenAI API client
@@ -27,6 +27,7 @@ def get_db():
 async def index():
     return {"msg": "working"}
 
+
 @app.post("/message")
 async def reply(request: Request, Body: str = Form(), db: Session = Depends(get_db)):
     try:
@@ -43,9 +44,25 @@ async def reply(request: Request, Body: str = Form(), db: Session = Depends(get_
 
         # Prepare messages for OpenAI
         messages = [
-            {"role": "system", "content": "You're a receptionist and in charge of customer experience at a high end argentinean restaurant called garufa, you make reservations and answer customer questions."},
-            {"role": "user", "content": body_text}
+            {
+                "role": "system",
+                "content": (
+                    "You're a receptionist and in charge of customer experience at a high end argentinean "
+                    "restaurant called garufa, you make reservations and answer customer questions."
+                ),
+            },
         ]
+
+        # Prepend FYI line if an upcoming reservation exists
+        client_row = client_model.get_client_by_phone(whatsapp_number)
+        if client_row:
+            upcoming = reservation_model.get_upcoming_reservation(client_row[0])
+            if upcoming:
+                res_time = upcoming["reservation_time"].strftime("%Y-%m-%d %H:%M")
+                fyi_line = f"FYI: You have a reservation on {res_time} for {upcoming['covers']} people."
+                messages.append({"role": "system", "content": fyi_line})
+
+        messages.append({"role": "user", "content": body_text})
 
         try:
             response = client.chat.completions.create(

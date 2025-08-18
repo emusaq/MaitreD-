@@ -68,6 +68,18 @@ CREATE TABLE IF NOT EXISTS Notes (
     FOREIGN KEY (history_id) REFERENCES History(history_id),
     FOREIGN KEY (employee_id) REFERENCES Employees(employee_id) ON DELETE SET NULL
 );
+
+CREATE TABLE IF NOT EXISTS Reservations (
+    reservation_id     SERIAL PRIMARY KEY,
+    client_id          INTEGER NOT NULL,
+    reservation_time   TIMESTAMP NOT NULL,
+    covers             INTEGER NOT NULL,
+    notes_json         JSONB,
+    created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT unique_reservation UNIQUE (client_id, reservation_time),
+    FOREIGN KEY (client_id) REFERENCES Clients(client_id) ON DELETE CASCADE
+);
 """
 
 def initialize_database():
