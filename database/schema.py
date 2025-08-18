@@ -141,7 +141,9 @@ CREATE TABLE IF NOT EXISTS reservations (
     time_24h     TIME NOT NULL,
     party_size   INTEGER NOT NULL CHECK (party_size > 0),
     slot_id      TEXT NOT NULL UNIQUE,
-    client_id    INTEGER REFERENCES Clients(client_id)
+    client_id    INTEGER REFERENCES Clients(client_id),
+    note         TEXT,
+    note-author  TEXT
 );
 """
 
