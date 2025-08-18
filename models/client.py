@@ -108,4 +108,19 @@ def update_last_visit(client_id: int) -> bool:
         """, (client_id,))
         conn.commit()
         return cur.rowcount > 0
+
+
+def get_or_create_client_id(full_name: str) -> int:
+    """Retrieve a client_id for ``full_name`` or create a placeholder client."""
+    parts = full_name.strip().split(" ", 1)
+    first_name = parts[0]
+    last_name = parts[1] if len(parts) > 1 else ""
+
+    existing = get_client_by_name(first_name, last_name)
+    if existing:
+        return existing[0]
+
+    # Create a placeholder client with an unknown phone number
+    placeholder_phone = "unknown"
+    return create_client(first_name, last_name, placeholder_phone)
     
