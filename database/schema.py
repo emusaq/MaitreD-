@@ -11,13 +11,70 @@ SCHEMA_SQL = """
 CREATE SCHEMA IF NOT EXISTS public;
 SET search_path TO public;
 
+-- Base conversations table (upgrade to durable conversation store)
 CREATE TABLE IF NOT EXISTS conversations (
-    id      INTEGER PRIMARY KEY,
-    sender  VARCHAR(255),
-    message TEXT,
-    response TEXT,
-    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    id               SERIAL PRIMARY KEY,
+    -- New conversation routing fields
+    channel          TEXT,
+    external_user_id TEXT,
+    opened_at        TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at       TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    status           TEXT DEFAULT 'open'
 );
+
+-- Helpful index to look up by channel + external_user_id
+CREATE INDEX IF NOT EXISTS idx_conversations_channel_user
+    ON conversations (channel, external_user_id);
+
+-- Backward-compat: if an old conversations table exists with legacy columns,
+-- ensure new columns are present (no-op if already added above on fresh DB)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='conversations' AND column_name='channel'
+    ) THEN
+        ALTER TABLE conversations ADD COLUMN channel TEXT;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='conversations' AND column_name='external_user_id'
+    ) THEN
+        ALTER TABLE conversations ADD COLUMN external_user_id TEXT;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='conversations' AND column_name='opened_at'
+    ) THEN
+        ALTER TABLE conversations ADD COLUMN opened_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='conversations' AND column_name='updated_at'
+    ) THEN
+        ALTER TABLE conversations ADD COLUMN updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='conversations' AND column_name='status'
+    ) THEN
+        ALTER TABLE conversations ADD COLUMN status TEXT DEFAULT 'open';
+    END IF;
+END $$;
+
+-- Messages table with idempotency via external_message_id (e.g., Twilio MessageSid)
+CREATE TABLE IF NOT EXISTS messages (
+    id                   SERIAL PRIMARY KEY,
+    conversation_id      INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    direction            TEXT NOT NULL CHECK (direction IN ('inbound','outbound')),
+    text                 TEXT NOT NULL,
+    external_message_id  TEXT,
+    created_at           TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_external_id
+    ON messages (external_message_id)
+    WHERE external_message_id IS NOT NULL;
 
 
 CREATE TABLE IF NOT EXISTS Clients (
@@ -75,6 +132,16 @@ CREATE TABLE IF NOT EXISTS Notes (
     FOREIGN KEY (client_id) REFERENCES Clients(client_id) ON DELETE CASCADE,
     FOREIGN KEY (history_id) REFERENCES History(history_id),
     FOREIGN KEY (employee_id) REFERENCES Employees(employee_id) ON DELETE SET NULL
+);
+
+-- Minimal reservations table and unique slot identifier to support MCP tools
+CREATE TABLE IF NOT EXISTS reservations (
+    id           SERIAL PRIMARY KEY,
+    date_iso     DATE NOT NULL,
+    time_24h     TIME NOT NULL,
+    party_size   INTEGER NOT NULL CHECK (party_size > 0),
+    slot_id      TEXT NOT NULL UNIQUE,
+    client_id    INTEGER REFERENCES Clients(client_id)
 );
 """
 

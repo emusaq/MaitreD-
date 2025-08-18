@@ -23,10 +23,27 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id = Column(Integer, primary_key=True, index=True)
-    sender = Column(String)
-    message = Column(String)
-    response = Column(String)
+    channel = Column(String, index=True)
+    external_user_id = Column(String, index=True)
+    opened_at = Column(DateTime, default=func.current_timestamp())
+    updated_at = Column(DateTime, default=func.current_timestamp())
+    status = Column(String, default="open")
+
+    # Relationship to messages
+    messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=False)
+    direction = Column(String, nullable=False)  # 'inbound' | 'outbound'
+    text = Column(Text, nullable=False)
+    external_message_id = Column(String, unique=False, index=True)
     created_at = Column(DateTime, default=func.current_timestamp())
+
+    conversation = relationship("Conversation", back_populates="messages")
 
 
 ## ORM models based on raw schema for Clients, Restaurants, Employees, History, and Notes
@@ -109,4 +126,6 @@ class Note(Base):
     history = relationship("History", back_populates="notes")
     employee = relationship("Employee", back_populates="notes")
 
-Base.metadata.create_all(engine)
+import os as _os
+if _os.getenv("SQLALCHEMY_CREATE_ALL", "1") == "1":
+    Base.metadata.create_all(engine)
