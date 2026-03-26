@@ -1,3 +1,4 @@
+-c constraints.txt
 fastapi
 uvicorn
 twilio
@@ -9,6 +10,8 @@ python-multipart
 pyngrok
 mcp
 openai-agents
-psycopg
+bcrypt
+itsdangerous
+jinja2
 
 #raw list of dependencies in env

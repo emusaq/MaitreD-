@@ -5,9 +5,11 @@ from models.models import SessionLocal, History, Note
 
 
 def get_client_history(
-    client_id: int, db: Session = SessionLocal()
+    client_id: int, db: Optional[Session] = None
 ) -> List[History]:
     """Return history records for a client, including related notes."""
+    if db is None:
+        db = SessionLocal()
     return (
         db.query(History)
         .options(joinedload(History.notes))
@@ -22,9 +24,11 @@ def add_visit(
     employee_id: Optional[int],
     items_ordered: str,
     note_text: Optional[str] = None,
-    db: Session = SessionLocal()
+    db: Optional[Session] = None,
 ) -> int:
     """Add a visit record and optional note, returning the history_id."""
+    if db is None:
+        db = SessionLocal()
     new_visit = History(
         client_id=client_id,
         employee_id=employee_id,

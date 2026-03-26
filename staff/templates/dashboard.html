@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Maitred{% endblock %}
+{% block content %}
+<h1>Today's Reservations — {{ today }}</h1>
+
+<div style="display:flex;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <div class="card" style="flex:1;min-width:160px;">
+    <h2>Reservations</h2>
+    <div class="stat">{{ reservations|length }}</div>
+  </div>
+  <div class="card" style="flex:1;min-width:160px;">
+    <h2>Total Covers</h2>
+    <div class="stat">{{ total_covers }}</div>
+  </div>
+  <div class="card" style="flex:1;min-width:160px;">
+    <h2>System Status</h2>
+    {% if reservations_enabled %}
+    <span class="badge badge-green" style="font-size:1rem;padding:.4rem .9rem;">Open</span>
+    {% else %}
+    <span class="badge badge-red" style="font-size:1rem;padding:.4rem .9rem;">Closed</span>
+    {% endif %}
+    {% if session.role in ('manager', 'owner') %}
+    <form method="post" action="/staff/settings" class="toggle-form" style="display:block;margin-top:.75rem;">
+      <input type="hidden" name="open_from" value="{{ settings.open_from if settings else '17:00' }}">
+      <input type="hidden" name="open_to" value="{{ settings.open_to if settings else '21:00' }}">
+      <input type="hidden" name="slot_interval" value="{{ settings.slot_interval if settings else 30 }}">
+      <input type="hidden" name="max_per_slot" value="{{ settings.max_per_slot if settings else 20 }}">
+      <input type="hidden" name="max_party_size" value="{{ settings.max_party_size if settings else 8 }}">
+      <input type="hidden" name="large_party_threshold" value="{{ settings.large_party_threshold if settings else 8 }}">
+      <input type="hidden" name="large_party_phone" value="{{ settings.large_party_phone if settings else '' }}">
+      <input type="hidden" name="confirm_message" value="{{ settings.confirm_message if settings else 'Your reservation at Garufa has been confirmed. We look forward to welcoming you.' }}">
+      <input type="hidden" name="deny_message" value="{{ settings.deny_message if settings else 'We regret we are unable to accommodate your request at this time. Please contact us directly for assistance.' }}">
+      <input type="hidden" name="cancel_message" value="{{ settings.cancel_message if settings else 'Your reservation at Garufa has been cancelled. We apologize for any inconvenience.' }}">
+      {% if reservations_enabled %}
+      <button type="submit" name="reservations_enabled" value="" class="btn btn-danger btn-sm">Stop Reservations</button>
+      {% else %}
+      <input type="hidden" name="reservations_enabled" value="true">
+      <button type="submit" class="btn btn-primary btn-sm">Open Reservations</button>
+      {% endif %}
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+{% if reservations %}
+<table>
+  <thead>
+    <tr>
+      <th>Status</th>
+      <th>Time</th>
+      <th>Party</th>
+      <th>Guest</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in reservations %}
+    <tr>
+      <td>
+        {% if r.status == 'confirmed' %}
+          <span class="badge badge-green">Confirmed</span>
+        {% elif r.status == 'pending' %}
+          <span class="badge" style="background:#fef3c7;color:#92400e;padding:.2rem .6rem;border-radius:999px;font-size:.75rem;font-weight:600;">Pending</span>
+        {% elif r.status in ('denied', 'cancelled') %}
+          <span class="badge badge-red">{{ r.status|capitalize }}</span>
+        {% else %}
+          <span class="badge">{{ r.status }}</span>
+        {% endif %}
+      </td>
+      <td>{{ r.time_24h }}</td>
+      <td>{{ r.party_size }}</td>
+      <td>{{ r.client_name }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p style="color:#888;margin-top:1rem;">No reservations for today.</p>
+{% endif %}
+
+<p style="margin-top:1.5rem;">
+  <a href="/staff/reservations" class="btn btn-primary">View all reservations</a>
+</p>
+{% endblock %}

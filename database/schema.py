@@ -140,11 +140,124 @@ CREATE TABLE IF NOT EXISTS reservations (
     date_iso     DATE NOT NULL,
     time_24h     TIME NOT NULL,
     party_size   INTEGER NOT NULL CHECK (party_size > 0),
-    slot_id      TEXT NOT NULL UNIQUE,
+    slot_id      TEXT NOT NULL,
     client_id    INTEGER REFERENCES Clients(client_id),
+    status       TEXT NOT NULL DEFAULT 'pending',
+    guest_name   TEXT,
+    occasion     TEXT,
+    guest_phone  TEXT,
     note         TEXT,
-    note-author  TEXT
+    note_author  TEXT
 );
+
+-- Migration guards for existing reservations table
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='reservations' AND column_name='status'
+    ) THEN
+        ALTER TABLE reservations ADD COLUMN status TEXT NOT NULL DEFAULT 'pending';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='reservations' AND column_name='guest_name'
+    ) THEN
+        ALTER TABLE reservations ADD COLUMN guest_name TEXT;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='reservations' AND column_name='occasion'
+    ) THEN
+        ALTER TABLE reservations ADD COLUMN occasion TEXT;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='reservations' AND column_name='guest_phone'
+    ) THEN
+        ALTER TABLE reservations ADD COLUMN guest_phone TEXT;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='reservations' AND column_name='note'
+    ) THEN
+        ALTER TABLE reservations ADD COLUMN note TEXT;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='reservations' AND column_name='note_author'
+    ) THEN
+        ALTER TABLE reservations ADD COLUMN note_author TEXT;
+    END IF;
+END $$;
+
+-- Staff-controlled reservation settings (one row per restaurant)
+CREATE TABLE IF NOT EXISTS reservation_settings (
+    id                    SERIAL PRIMARY KEY,
+    restaurant_id         INTEGER REFERENCES Restaurants(restaurant_id),
+    reservations_enabled  BOOLEAN NOT NULL DEFAULT TRUE,
+    open_from             TIME NOT NULL DEFAULT '17:00',
+    open_to               TIME NOT NULL DEFAULT '21:00',
+    slot_interval         INTEGER NOT NULL DEFAULT 30,
+    max_per_slot          INTEGER NOT NULL DEFAULT 20,
+    max_party_size        INTEGER NOT NULL DEFAULT 8,
+    large_party_threshold INTEGER NOT NULL DEFAULT 8,
+    large_party_phone     TEXT NOT NULL DEFAULT '',
+    confirm_message       TEXT NOT NULL DEFAULT 'Your reservation at Garufa has been confirmed. We look forward to welcoming you.',
+    deny_message          TEXT NOT NULL DEFAULT 'We regret we are unable to accommodate your request at this time. Please contact us directly for assistance.',
+    cancel_message        TEXT NOT NULL DEFAULT 'Your reservation at Garufa has been cancelled. We apologize for any inconvenience.',
+    chatbot_paused        BOOLEAN NOT NULL DEFAULT FALSE,
+    paused_away_message   TEXT NOT NULL DEFAULT 'We are temporarily unavailable. Please contact us directly or try again later.',
+    updated_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_by            INTEGER REFERENCES Employees(employee_id)
+);
+
+-- Migration guards for existing reservation_settings table
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='reservation_settings' AND column_name='large_party_threshold'
+    ) THEN
+        ALTER TABLE reservation_settings ADD COLUMN large_party_threshold INTEGER NOT NULL DEFAULT 8;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='reservation_settings' AND column_name='large_party_phone'
+    ) THEN
+        ALTER TABLE reservation_settings ADD COLUMN large_party_phone TEXT NOT NULL DEFAULT '';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='reservation_settings' AND column_name='confirm_message'
+    ) THEN
+        ALTER TABLE reservation_settings ADD COLUMN confirm_message TEXT NOT NULL DEFAULT 'Your reservation at Garufa has been confirmed. We look forward to welcoming you.';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='reservation_settings' AND column_name='deny_message'
+    ) THEN
+        ALTER TABLE reservation_settings ADD COLUMN deny_message TEXT NOT NULL DEFAULT 'We regret we are unable to accommodate your request at this time. Please contact us directly for assistance.';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='reservation_settings' AND column_name='cancel_message'
+    ) THEN
+        ALTER TABLE reservation_settings ADD COLUMN cancel_message TEXT NOT NULL DEFAULT 'Your reservation at Garufa has been cancelled. We apologize for any inconvenience.';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='reservation_settings' AND column_name='chatbot_paused'
+    ) THEN
+        ALTER TABLE reservation_settings ADD COLUMN chatbot_paused BOOLEAN NOT NULL DEFAULT FALSE;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='reservation_settings' AND column_name='paused_away_message'
+    ) THEN
+        ALTER TABLE reservation_settings ADD COLUMN paused_away_message TEXT NOT NULL DEFAULT 'We are temporarily unavailable. Please contact us directly or try again later.';
+    END IF;
+END $$;
 """
 
 def initialize_database():

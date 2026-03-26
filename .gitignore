@@ -1,0 +1,19 @@
+# OS
+.DS_Store
+
+# Environments
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Local env and secrets
+.env
+
+# Test artifacts
+test_e2e.db
+.pytest_cache/
+.mypy_cache/
+

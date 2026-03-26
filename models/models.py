@@ -5,17 +5,20 @@ from decouple import config
 from sqlalchemy import Text, Date, DateTime, Boolean, ForeignKey, func
 from sqlalchemy.orm import relationship
 
-#connection to maitred postgresql database
-url = URL.create(
-    drivername ="postgresql",
-    username=config("DB_USER"),
-    password=config("DB_PASSWORD"),
-    host="localhost",
-    database="maitred",
-    port=5433
-)
-
-engine = create_engine(url)
+# connection to maitred postgresql database (supports DATABASE_URL override)
+_database_url = config("DATABASE_URL", default=None)
+if _database_url:
+    engine = create_engine(_database_url)
+else:
+    url = URL.create(
+        drivername="postgresql",
+        username=config("DB_USER"),
+        password=config("DB_PASSWORD"),
+        host="localhost",
+        database="maitred",
+        port=5433,
+    )
+    engine = create_engine(url)
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
 
@@ -126,6 +129,37 @@ class Note(Base):
     history = relationship("History", back_populates="notes")
     employee = relationship("Employee", back_populates="notes")
 
+# Reservation settings (staff-controlled)
+class ReservationSettings(Base):
+    __tablename__ = "reservation_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    restaurant_id = Column(Integer, ForeignKey("restaurants.restaurant_id"))
+    reservations_enabled = Column(Boolean, nullable=False, default=True)
+    open_from = Column(Text, nullable=False, default="17:00")
+    open_to = Column(Text, nullable=False, default="21:00")
+    slot_interval = Column(Integer, nullable=False, default=30)
+    max_per_slot = Column(Integer, nullable=False, default=20)
+    max_party_size = Column(Integer, nullable=False, default=8)
+    large_party_threshold = Column(Integer, nullable=False, default=8)
+    large_party_phone = Column(Text, nullable=False, default="")
+    confirm_message = Column(Text, nullable=False, default="Your reservation at Garufa has been confirmed. We look forward to welcoming you.")
+    deny_message = Column(Text, nullable=False, default="We regret we are unable to accommodate your request at this time. Please contact us directly for assistance.")
+    cancel_message = Column(Text, nullable=False, default="Your reservation at Garufa has been cancelled. We apologize for any inconvenience.")
+    chatbot_paused = Column(Boolean, nullable=False, default=False)
+    paused_away_message = Column(Text, nullable=False, default="We are temporarily unavailable. Please contact us directly or try again later.")
+    updated_at = Column(DateTime, default=func.current_timestamp())
+    updated_by = Column(Integer, ForeignKey("employees.employee_id"))
+
+
 import os as _os
-if _os.getenv("SQLALCHEMY_CREATE_ALL", "1") == "1":
+if _os.getenv("SQLALCHEMY_CREATE_ALL", "0") == "1":
     Base.metadata.create_all(engine)
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

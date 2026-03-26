@@ -6,6 +6,9 @@ Overview
 Env Vars
 - `CONVERSATION_TTL_HOURS`: hours to reuse a conversation (default: `24`).
 - `APP_TIMEZONE`: IANA timezone for date context (default: `America/Ciudad_Juarez`).
+- `DATABASE_URL`: SQLAlchemy DSN for app models (e.g., `postgresql+psycopg2://user:pass@localhost:5433/maitred`).
+- `MAITRED_DB`: psycopg DSN for `manage.py`/schema ops (e.g., `dbname=maitred user=postgres password=postgres host=localhost port=5433`).
+- `SQLALCHEMY_CREATE_ALL`: if set to `1`, models auto-create tables; default is `0` to avoid accidental writes.
 
 DB Migration
 - Initialize or upgrade the schema:
@@ -36,4 +39,8 @@ MCP Tools
 - Exposed tools: `list_open_times(date_iso, party_size)`, `check_availability(date_iso, time_24h, party_size)`, `create_reservation(slot_id, party_size, client_ref?)`.
 - Server resolves `client_ref` if present; tools never accept free-text PII.
 - Responses include only opaque ids and times (no names/phones/emails).
+Setup
+- Copy `.env.example` to `.env` and fill in values. `.env` is gitignored.
+- Prefer a single virtualenv (e.g., `.venv/`).
+- Install dependencies with: `pip install -r requirements.txt` (uses `constraints.txt` for pinning).
 

@@ -10,10 +10,11 @@ import uuid
 
 # Find your Account SID and Auth Token at twilio.com/console
 # and set the environment variables. See http://twil.io/secure
-account_sid = config('TWILIO_ACCOUNT_SID')
-auth_token = config("TWILIO_AUTH_TOKEN")
-client = Client(account_sid, auth_token)
-twilio_number = config('TWILIO_NUMBER')
+account_sid = config('TWILIO_ACCOUNT_SID', default=None)
+auth_token = config("TWILIO_AUTH_TOKEN", default=None)
+twilio_number = config('TWILIO_NUMBER', default=None)
+_twilio_enabled = bool(account_sid and auth_token and twilio_number)
+client = Client(account_sid, auth_token) if _twilio_enabled else None
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -30,6 +31,9 @@ def new_trace_id() -> str:
 
 # Sending message logic through Twilio Messaging API
 def send_message(to_number, body_text):
+    if not _twilio_enabled or client is None:
+        logger.warning("Twilio not configured; skipping send.")
+        return None
     try:
         message = client.messages.create(
             from_=f"whatsapp:{twilio_number}",

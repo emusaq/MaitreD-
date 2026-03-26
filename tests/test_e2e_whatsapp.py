@@ -3,12 +3,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 
 import os
 os.environ["SQLALCHEMY_CREATE_ALL"] = "0"
 import webapp as web
-from models.models import Base, Conversation, Message
+from models.models import Base, Conversation, Message, get_db
 
 
 class DummyOpenAIResponse:
@@ -16,8 +15,10 @@ class DummyOpenAIResponse:
         class Msg:
             def __init__(self, content):
                 self.content = content
+                self.tool_calls = None  # required by tool-call loop
         def __init__(self, content):
             self.message = self.Msg(content)
+            self.finish_reason = "stop"  # required by tool-call loop
     def __init__(self, content):
         self.choices = [self.Choice(content)]
 
@@ -25,10 +26,9 @@ class DummyOpenAIResponse:
 class E2EWhatsAppTests(unittest.TestCase):
     def setUp(self):
         # Use file-based SQLite DB to allow cross-thread access
-        import os as _os
         db_path = './test_e2e.db'
         try:
-            _os.remove(db_path)
+            os.remove(db_path)
         except FileNotFoundError:
             pass
         self.engine = create_engine(f'sqlite:///{db_path}', connect_args={'check_same_thread': False})
@@ -42,28 +42,29 @@ class E2EWhatsAppTests(unittest.TestCase):
                 yield db
             finally:
                 db.close()
-        web.app.dependency_overrides[web.get_db] = override_get_db
+        # Key must be the same function object FastAPI registered as the dependency
+        web.app.dependency_overrides[get_db] = override_get_db
 
-        # Mock OpenAI call
-        class MockChat:
-            @staticmethod
-            def completions():
-                pass
+        # Bypass Twilio signature verification in tests
+        web._skip_twilio_validation = True
+
+        # Mock OpenAI client — accepts all kwargs the real call passes
         class MockClient:
             class chat:
                 class completions:
                     @staticmethod
-                    def create(model, messages, max_tokens, temperature):
+                    def create(*args, **kwargs):
                         return DummyOpenAIResponse("ok")
         web.client = MockClient()
-        # Mock Twilio send to avoid network
+
+        # Mock Twilio send to avoid network calls
         web.send_message = lambda to, body: "SM_TEST_FAKE"
 
         self.client = TestClient(web.app)
 
     def tearDown(self):
-        # Clean up DB file between tests if desired
-        pass
+        web.app.dependency_overrides.clear()
+        web._skip_twilio_validation = False
 
     def test_two_messages_same_conversation_then_ttl_new(self):
         from_number = "+15551234567"
@@ -74,14 +75,14 @@ class E2EWhatsAppTests(unittest.TestCase):
         r2 = self.client.post("/message", data={"From": f"whatsapp:{from_number}", "Body": "Need a table", "MessageSid": "SM2"})
         self.assertEqual(r2.status_code, 200)
 
-        # Assert one conversation, two messages
+        # Assert one conversation, two inbound + two outbound messages
         db = self.SessionLocal()
         convos = db.query(Conversation).filter_by(channel='whatsapp', external_user_id=from_number).all()
         self.assertEqual(len(convos), 1)
         msgs = db.query(Message).filter(Message.conversation_id == convos[0].id).all()
         self.assertEqual(len(msgs), 4)  # 2 inbound + 2 outbound
 
-        # Age the conversation beyond TTL and send third message
+        # Age the conversation beyond TTL and send a third message
         convos[0].updated_at = datetime.now() - timedelta(days=2)
         db.commit()
 
@@ -90,6 +91,21 @@ class E2EWhatsAppTests(unittest.TestCase):
 
         convos2 = db.query(Conversation).filter_by(channel='whatsapp', external_user_id=from_number).all()
         self.assertEqual(len(convos2), 2)
+        db.close()
+
+    def test_duplicate_inbound_sid_is_idempotent(self):
+        """A duplicate Twilio delivery (same MessageSid) must not create a second record."""
+        from_number = "+15559999001"
+        r1 = self.client.post("/message", data={"From": f"whatsapp:{from_number}", "Body": "Hello", "MessageSid": "SM_DUP"})
+        self.assertEqual(r1.status_code, 200)
+
+        r2 = self.client.post("/message", data={"From": f"whatsapp:{from_number}", "Body": "Hello", "MessageSid": "SM_DUP"})
+        self.assertEqual(r2.status_code, 200)
+        self.assertTrue(r2.json().get("idempotent"), "Second delivery should be marked idempotent")
+
+        db = self.SessionLocal()
+        count = db.query(Message).filter(Message.external_message_id == "SM_DUP").count()
+        self.assertEqual(count, 1, "Duplicate SID must produce exactly one message record")
         db.close()
 
 

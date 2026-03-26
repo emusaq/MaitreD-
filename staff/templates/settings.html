@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Settings — Maitred{% endblock %}
+{% block content %}
+<h1>Reservation Settings</h1>
+
+{% if saved %}
+<div class="alert alert-success">Settings saved successfully.</div>
+{% endif %}
+
+<div class="card" style="max-width:480px;">
+  <form method="post" action="/staff/settings">
+
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;padding:.75rem 0;border-bottom:1px solid #eee;margin-bottom:1rem;">
+      <div>
+        <strong>Accept Reservations</strong>
+        <p style="font-size:.8rem;color:#888;margin-top:.2rem;">Toggle to immediately open or close bookings.</p>
+      </div>
+      <label style="position:relative;display:inline-block;width:44px;height:24px;margin:0;">
+        <input type="checkbox" name="reservations_enabled" value="true"
+          {% if settings and settings.reservations_enabled %}checked{% endif %}
+          style="opacity:0;width:0;height:0;">
+        <span style="position:absolute;cursor:pointer;inset:0;background:#ccc;border-radius:24px;transition:.2s;"></span>
+      </label>
+    </div>
+
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;padding:.75rem 0;border-bottom:1px solid #eee;margin-bottom:1rem;">
+      <div>
+        <strong>Pause Chatbot</strong>
+        <p style="font-size:.8rem;color:#888;margin-top:.2rem;">Stop the bot from responding. Guests will receive your away message instead.</p>
+      </div>
+      <label style="position:relative;display:inline-block;width:44px;height:24px;margin:0;">
+        <input type="checkbox" name="chatbot_paused" value="true"
+          {% if settings and settings.chatbot_paused %}checked{% endif %}
+          style="opacity:0;width:0;height:0;">
+        <span style="position:absolute;cursor:pointer;inset:0;background:#ccc;border-radius:24px;transition:.2s;"></span>
+      </label>
+    </div>
+
+    <div class="form-group">
+      <label>Away Message</label>
+      <textarea name="paused_away_message" rows="3" style="width:100%;padding:.5rem;border:1px solid #ddd;border-radius:4px;font-family:inherit;font-size:.9rem;box-sizing:border-box;">{{ settings.paused_away_message if settings else 'We are temporarily unavailable. Please contact us directly or try again later.' }}</textarea>
+      <p style="font-size:.8rem;color:#888;margin-top:.2rem;">Sent to guests when the chatbot is paused.</p>
+    </div>
+
+    <div class="form-group">
+      <label>Opening Time</label>
+      <input type="time" name="open_from" value="{{ settings.open_from if settings else '17:00' }}" required>
+    </div>
+
+    <div class="form-group">
+      <label>Last Slot Time</label>
+      <input type="time" name="open_to" value="{{ settings.open_to if settings else '21:00' }}" required>
+    </div>
+
+    <div class="form-group">
+      <label>Slot Interval (minutes)</label>
+      <input type="number" name="slot_interval" min="15" max="120" step="15"
+        value="{{ settings.slot_interval if settings else 30 }}" required>
+    </div>
+
+    <div class="form-group">
+      <label>Max Covers per Slot</label>
+      <input type="number" name="max_per_slot" min="1" max="500"
+        value="{{ settings.max_per_slot if settings else 20 }}" required>
+    </div>
+
+    <div class="form-group">
+      <label>Max Party Size</label>
+      <input type="number" name="max_party_size" min="1" max="50"
+        value="{{ settings.max_party_size if settings else 8 }}" required>
+    </div>
+
+    <div class="form-group">
+      <label>Large Party Redirect Threshold</label>
+      <input type="number" name="large_party_threshold" min="1" max="50"
+        value="{{ settings.large_party_threshold if settings else 8 }}" required>
+      <p style="font-size:.8rem;color:#888;margin-top:.2rem;">Parties at or above this size are redirected to call instead of booking online.</p>
+    </div>
+
+    <div class="form-group">
+      <label>Large Party Phone Number</label>
+      <input type="text" name="large_party_phone"
+        value="{{ settings.large_party_phone if settings else '' }}"
+        placeholder="e.g. +52 55 1234 5678">
+      <p style="font-size:.8rem;color:#888;margin-top:.2rem;">Displayed to guests who need to call for large group arrangements. Leave blank to omit.</p>
+    </div>
+
+    <hr style="margin:1.25rem 0;border:none;border-top:1px solid #eee;">
+    <h3 style="margin-bottom:.75rem;font-size:1rem;">WhatsApp Notification Messages</h3>
+
+    <div class="form-group">
+      <label>Confirmation Message</label>
+      <textarea name="confirm_message" rows="3" style="width:100%;padding:.5rem;border:1px solid #ddd;border-radius:4px;font-family:inherit;font-size:.9rem;box-sizing:border-box;">{{ settings.confirm_message if settings else 'Your reservation at Garufa has been confirmed. We look forward to welcoming you.' }}</textarea>
+      <p style="font-size:.8rem;color:#888;margin-top:.2rem;">Sent automatically when staff confirms a reservation.</p>
+    </div>
+
+    <div class="form-group">
+      <label>Denial Message</label>
+      <textarea name="deny_message" rows="3" style="width:100%;padding:.5rem;border:1px solid #ddd;border-radius:4px;font-family:inherit;font-size:.9rem;box-sizing:border-box;">{{ settings.deny_message if settings else 'We regret we are unable to accommodate your request at this time. Please contact us directly for assistance.' }}</textarea>
+      <p style="font-size:.8rem;color:#888;margin-top:.2rem;">Pre-filled in the denial dialog. Staff can edit before sending.</p>
+    </div>
+
+    <div class="form-group">
+      <label>Cancellation Message</label>
+      <textarea name="cancel_message" rows="3" style="width:100%;padding:.5rem;border:1px solid #ddd;border-radius:4px;font-family:inherit;font-size:.9rem;box-sizing:border-box;">{{ settings.cancel_message if settings else 'Your reservation at Garufa has been cancelled. We apologize for any inconvenience.' }}</textarea>
+      <p style="font-size:.8rem;color:#888;margin-top:.2rem;">Pre-filled in the cancellation dialog. Staff can edit before sending.</p>
+    </div>
+
+    <button type="submit" class="btn btn-primary" style="width:100%;padding:.6rem;">Save Settings</button>
+  </form>
+</div>
+
+<script>
+  // Visual toggle styling
+  document.querySelectorAll('input[type=checkbox]').forEach(function(cb) {
+    var span = cb.nextElementSibling;
+    function update() { span.style.background = cb.checked ? '#2563eb' : '#ccc'; }
+    update();
+    cb.addEventListener('change', update);
+  });
+</script>
+{% endblock %}

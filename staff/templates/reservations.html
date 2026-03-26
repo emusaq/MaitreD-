@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Reservations — Maitred{% endblock %}
+{% block content %}
+<style>
+  .badge-yellow { background:#fef3c7;color:#92400e;padding:.2rem .6rem;border-radius:999px;font-size:.75rem;font-weight:600;white-space:nowrap; }
+  .badge-red    { background:#fee2e2;color:#991b1b;padding:.2rem .6rem;border-radius:999px;font-size:.75rem;font-weight:600;white-space:nowrap; }
+  .btn-warning  { background:#d97706;color:#fff;border:none;cursor:pointer; }
+  .btn-warning:hover { background:#b45309; }
+  dialog { border:none;border-radius:8px;padding:1.5rem;max-width:480px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.18); }
+  dialog::backdrop { background:rgba(0,0,0,.4); }
+  dialog h3 { margin:0 0 1rem; }
+  dialog textarea { width:100%;padding:.5rem;border:1px solid #ddd;border-radius:4px;font-family:inherit;font-size:.9rem;resize:vertical;box-sizing:border-box; }
+  .dialog-actions { display:flex;gap:.75rem;justify-content:flex-end;margin-top:1rem; }
+  .actions-cell { display:flex;gap:.4rem;flex-wrap:wrap; }
+</style>
+
+<h1>Reservations</h1>
+
+<form method="get" action="/staff/reservations" style="margin-bottom:1.25rem;display:flex;gap:.75rem;align-items:flex-end;">
+  <div>
+    <label for="date_filter">Date</label>
+    <input type="date" id="date_filter" name="date_filter" value="{{ date_filter }}" style="width:auto;">
+  </div>
+  <button type="submit" class="btn btn-primary">Filter</button>
+</form>
+
+{% if reservations %}
+<table>
+  <thead>
+    <tr>
+      <th>Status</th>
+      <th>Date</th>
+      <th>Time</th>
+      <th>Party</th>
+      <th>Guest</th>
+      <th>Occasion</th>
+      <th>Note</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in reservations %}
+    <tr>
+      <td>
+        {% if r.status == 'confirmed' %}
+          <span class="badge badge-green">Confirmed</span>
+        {% elif r.status == 'pending' %}
+          <span class="badge badge-yellow">Pending</span>
+        {% elif r.status == 'denied' %}
+          <span class="badge badge-red">Denied</span>
+        {% elif r.status == 'cancelled' %}
+          <span class="badge badge-red">Cancelled</span>
+        {% else %}
+          <span class="badge badge-yellow">{{ r.status }}</span>
+        {% endif %}
+      </td>
+      <td>{{ r.date_iso }}</td>
+      <td>{{ r.time_24h }}</td>
+      <td>{{ r.party_size }}</td>
+      <td>{{ r.client_name }}</td>
+      <td>{{ r.occasion or "—" }}</td>
+      <td>{{ r.note or "—" }}</td>
+      <td class="actions-cell">
+        {% if r.status == 'pending' %}
+          <form method="post" action="/staff/reservations/{{ r.id }}/confirm" onsubmit="return confirm('Confirm this reservation?')">
+            <button type="submit" class="btn btn-primary btn-sm">Confirm</button>
+          </form>
+          <button type="button" onclick="document.getElementById('deny-modal-{{ r.id }}').showModal()" class="btn btn-warning btn-sm">Deny</button>
+          <button type="button" onclick="document.getElementById('cancel-modal-{{ r.id }}').showModal()" class="btn btn-danger btn-sm">Cancel</button>
+        {% elif r.status == 'confirmed' %}
+          <button type="button" onclick="document.getElementById('cancel-modal-{{ r.id }}').showModal()" class="btn btn-danger btn-sm">Cancel</button>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<!-- Modals -->
+{% for r in reservations %}
+  {% if r.status in ('pending', 'confirmed') %}
+
+  {% if r.status == 'pending' %}
+  <dialog id="deny-modal-{{ r.id }}">
+    <h3>Send Denial Message</h3>
+    <form method="post" action="/staff/reservations/{{ r.id }}/deny">
+      <label style="font-size:.85rem;color:#555;display:block;margin-bottom:.4rem;">Message to guest</label>
+      <textarea name="custom_message" rows="4">{{ deny_message }}</textarea>
+      <div class="dialog-actions">
+        <button type="button" onclick="this.closest('dialog').close()" class="btn">Back</button>
+        <button type="submit" class="btn btn-warning">Send &amp; Deny</button>
+      </div>
+    </form>
+  </dialog>
+  {% endif %}
+
+  <dialog id="cancel-modal-{{ r.id }}">
+    <h3>Send Cancellation Message</h3>
+    <form method="post" action="/staff/reservations/{{ r.id }}/cancel">
+      <label style="font-size:.85rem;color:#555;display:block;margin-bottom:.4rem;">Message to guest</label>
+      <textarea name="custom_message" rows="4">{{ cancel_message }}</textarea>
+      <div class="dialog-actions">
+        <button type="button" onclick="this.closest('dialog').close()" class="btn">Back</button>
+        <button type="submit" class="btn btn-danger">Send &amp; Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  {% endif %}
+{% endfor %}
+
+{% else %}
+<p style="color:#888;margin-top:1rem;">No reservations found for {{ date_filter }}.</p>
+{% endif %}
+{% endblock %}

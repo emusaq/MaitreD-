@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Client Profile — Maitred{% endblock %}
+{% block content %}
+<h1>Client Profile</h1>
+<div class="card" style="max-width:520px;">
+  <table style="box-shadow:none;">
+    <tr><th>Name</th><td>{{ client.first_name }} {{ client.last_name }}</td></tr>
+    <tr><th>Preferred Seating</th><td>{{ client.preferred_seating or "—" }}</td></tr>
+    <tr><th>Preferred Server</th><td>{{ client.preferred_server or "—" }}</td></tr>
+    <tr><th>Last Visit</th><td>{{ client.last_visit.strftime("%Y-%m-%d") if client.last_visit else "—" }}</td></tr>
+    <tr><th>Member Since</th><td>{{ client.date_created or "—" }}</td></tr>
+    <tr><th>Birthday</th><td>{{ client.birthday or "—" }}</td></tr>
+    <tr><th>Marketing</th><td>{{ "Opted in" if client.allow_marketing else "Opted out" }}</td></tr>
+  </table>
+
+  {% if client.client_summary %}
+  <div style="margin-top:1rem;">
+    <strong>Notes</strong>
+    <p style="margin-top:.4rem;font-size:.9rem;color:#444;">{{ client.client_summary }}</p>
+  </div>
+  {% endif %}
+
+  {% if client.ai_summary %}
+  <div style="margin-top:1rem;">
+    <strong>AI Summary</strong>
+    <p style="margin-top:.4rem;font-size:.9rem;color:#444;">{{ client.ai_summary }}</p>
+  </div>
+  {% endif %}
+</div>
+<p style="margin-top:1rem;"><a href="/staff/" class="btn btn-primary">← Back to Dashboard</a></p>
+{% endblock %}

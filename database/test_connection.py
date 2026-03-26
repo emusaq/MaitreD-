@@ -3,6 +3,7 @@
 from database.connection import connect
 
 def test_db_connection():
+    conn = None
     try:
         conn = connect()
         cursor = conn.cursor()
