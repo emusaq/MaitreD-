@@ -13,5 +13,8 @@ openai-agents
 bcrypt
 itsdangerous
 jinja2
+alembic
+redis
+fakeredis
 
 #raw list of dependencies in env

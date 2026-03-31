@@ -1,24 +1,11 @@
-from sqlalchemy import create_engine, Column, Integer, String
-from sqlalchemy.engine import URL
+from sqlalchemy import create_engine, Column, Integer, String, Index
 from sqlalchemy.orm import declarative_base, sessionmaker
-from decouple import config
-from sqlalchemy import Text, Date, DateTime, Boolean, ForeignKey, func
+from sqlalchemy import Text, Date, DateTime, Time, Boolean, ForeignKey, func
 from sqlalchemy.orm import relationship
 
-# connection to maitred postgresql database (supports DATABASE_URL override)
-_database_url = config("DATABASE_URL", default=None)
-if _database_url:
-    engine = create_engine(_database_url)
-else:
-    url = URL.create(
-        drivername="postgresql",
-        username=config("DB_USER"),
-        password=config("DB_PASSWORD"),
-        host="localhost",
-        database="maitred",
-        port=5433,
-    )
-    engine = create_engine(url)
+from config import get_database_url
+
+engine = create_engine(get_database_url())
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
 
@@ -40,13 +27,21 @@ class Message(Base):
     __tablename__ = "messages"
 
     id = Column(Integer, primary_key=True, index=True)
-    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=False)
+    conversation_id = Column(Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False)
     direction = Column(String, nullable=False)  # 'inbound' | 'outbound'
     text = Column(Text, nullable=False)
-    external_message_id = Column(String, unique=False, index=True)
+    external_message_id = Column(String, unique=False, index=False)
     created_at = Column(DateTime, default=func.current_timestamp())
 
     conversation = relationship("Conversation", back_populates="messages")
+
+# Partial unique index: enforces idempotency on non-NULL external_message_id
+_idx_messages_external_id = Index(
+    "idx_messages_external_id",
+    Message.external_message_id,
+    unique=True,
+    postgresql_where=(Message.external_message_id.isnot(None)),
+)
 
 
 ## ORM models based on raw schema for Clients, Restaurants, Employees, History, and Notes
@@ -103,9 +98,9 @@ class History(Base):
     __tablename__ = "history"
 
     history_id = Column(Integer, primary_key=True, index=True)
-    client_id = Column(Integer, ForeignKey("clients.client_id"), nullable=False)
-    restaurant_id = Column(Integer, ForeignKey("restaurants.restaurant_id"))
-    employee_id = Column(Integer, ForeignKey("employees.employee_id"))
+    client_id = Column(Integer, ForeignKey("clients.client_id", ondelete="CASCADE"), nullable=False, index=True)
+    restaurant_id = Column(Integer, ForeignKey("restaurants.restaurant_id", ondelete="SET NULL"))
+    employee_id = Column(Integer, ForeignKey("employees.employee_id", ondelete="SET NULL"))
     items_ordered = Column(Text)
     visit_date = Column(DateTime, default=func.current_timestamp())
 
@@ -119,15 +114,34 @@ class Note(Base):
     __tablename__ = "notes"
 
     note_id = Column(Integer, primary_key=True, index=True)
-    client_id = Column(Integer, ForeignKey("clients.client_id"), nullable=False)
-    history_id = Column(Integer, ForeignKey("history.history_id"))
-    employee_id = Column(Integer, ForeignKey("employees.employee_id"))
+    client_id = Column(Integer, ForeignKey("clients.client_id", ondelete="CASCADE"), nullable=False)
+    history_id = Column(Integer, ForeignKey("history.history_id"), index=True)
+    employee_id = Column(Integer, ForeignKey("employees.employee_id", ondelete="SET NULL"))
     note_text = Column(Text, nullable=False)
     created_at = Column(DateTime, default=func.current_timestamp())
 
     client = relationship("Client", back_populates="notes")
     history = relationship("History", back_populates="notes")
     employee = relationship("Employee", back_populates="notes")
+
+# Reservation model
+class Reservation(Base):
+    __tablename__ = "reservations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date_iso = Column(Date, nullable=False)
+    time_24h = Column(Time, nullable=False)
+    party_size = Column(Integer, nullable=False)
+    slot_id = Column(Text, nullable=False)
+    client_id = Column(Integer, ForeignKey("clients.client_id"))
+    status = Column(Text, nullable=False, default="pending", server_default="'pending'")
+    guest_name = Column(Text)
+    occasion = Column(Text)
+    guest_phone = Column(Text)
+    note = Column(Text)
+    note_author = Column(Text)
+
+    client = relationship("Client")
 
 # Reservation settings (staff-controlled)
 class ReservationSettings(Base):
@@ -136,8 +150,8 @@ class ReservationSettings(Base):
     id = Column(Integer, primary_key=True, index=True)
     restaurant_id = Column(Integer, ForeignKey("restaurants.restaurant_id"))
     reservations_enabled = Column(Boolean, nullable=False, default=True)
-    open_from = Column(Text, nullable=False, default="17:00")
-    open_to = Column(Text, nullable=False, default="21:00")
+    open_from = Column(Time, nullable=False, default="17:00")
+    open_to = Column(Time, nullable=False, default="21:00")
     slot_interval = Column(Integer, nullable=False, default=30)
     max_per_slot = Column(Integer, nullable=False, default=20)
     max_party_size = Column(Integer, nullable=False, default=8)

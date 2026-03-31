@@ -1,8 +1,7 @@
 # Third-party imports
 from openai import OpenAI, OpenAIError, RateLimitError
-from fastapi import FastAPI, Form, Depends, Request, HTTPException
+from fastapi import FastAPI, Form, Depends, Request, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
-from decouple import config
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
@@ -11,18 +10,35 @@ from twilio.request_validator import RequestValidator
 # Internal imports
 import json
 from models.models import Conversation, Message, ReservationSettings, get_db
+from models.reservation import attach_guest_phone
 from utils import send_message, logger, redact_pii, new_trace_id
 from security import sanitize_input, filter_output, build_system_prompt, INJECTION_REPLY
 from rate_limiter import is_allowed
 from reservation_tools import OPENAI_TOOLS, execute_tool
+from services.reservation import _fire_hooks
 from staff.app import router as staff_router
+from config import (
+    OPENAI_API_KEY as _openai_key,
+    OPENAI_MODEL as _openai_model,
+    OPENAI_TEMPERATURE as _openai_temperature,
+    OPENAI_MAX_TOKENS as _openai_max_tokens,
+    CONVERSATION_HISTORY_LIMIT as _history_limit,
+    MAX_TOOL_ROUNDS as _max_tool_rounds,
+    CONVERSATION_TTL_HOURS as _ttl_hours,
+    APP_TIMEZONE as _app_timezone,
+    TWILIO_AUTH_TOKEN as _twilio_auth_token,
+    TWILIO_SKIP_VALIDATION as _skip_twilio_validation,
+)
 
 
 app = FastAPI()
 app.include_router(staff_router)
 
+# MCP server is initialized here after app is created (avoids circular import)
+from mcp.mcp_server import init_server as _init_mcp_server  # noqa: E402
+_init_mcp_server(app)
+
 # Set up the OpenAI API client (tolerate missing key during import for tests)
-_openai_key = config("OPENAI_API_KEY", default=None)
 if _openai_key:
     client = OpenAI(api_key=_openai_key)
 else:
@@ -35,16 +51,31 @@ else:
     client = _NoOpenAI()
 
 # Twilio webhook validator (used in /message)
-_twilio_auth_token = config("TWILIO_AUTH_TOKEN", default=None)
 _twilio_validator = RequestValidator(_twilio_auth_token) if _twilio_auth_token else None
-_skip_twilio_validation = config("TWILIO_SKIP_VALIDATION", default="false").lower() == "true"
 
-# AI model settings
-_openai_model = config("OPENAI_MODEL", default="gpt-4o-mini")
-_openai_temperature = config("OPENAI_TEMPERATURE", default=0.2, cast=float)
-_openai_max_tokens = config("OPENAI_MAX_TOKENS", default=300, cast=int)
-_history_limit = config("CONVERSATION_HISTORY_LIMIT", default=12, cast=int)
-_max_tool_rounds = config("MAX_TOOL_ROUNDS", default=5, cast=int)
+
+def _assistant_message_to_payload(message) -> dict:
+    payload = {"role": "assistant"}
+
+    content = getattr(message, "content", None)
+    if content is not None:
+        payload["content"] = content
+
+    tool_calls = getattr(message, "tool_calls", None)
+    if tool_calls:
+        payload["tool_calls"] = [
+            {
+                "id": tc.id,
+                "type": getattr(tc, "type", "function"),
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments,
+                },
+            }
+            for tc in tool_calls
+        ]
+
+    return payload
 
 
 @app.get("/")
@@ -53,7 +84,12 @@ async def index():
 
 
 @app.post("/message")
-async def reply(request: Request, Body: str = Form(), db: Session = Depends(get_db)):
+async def reply(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    Body: str = Form(),
+    db: Session = Depends(get_db),
+):
     trace_id = new_trace_id()
     try:
         form_data = await request.form()
@@ -110,8 +146,8 @@ async def reply(request: Request, Body: str = Form(), db: Session = Depends(get_
                 return {"status": "ok", "idempotent": True}
 
         # Find or create a conversation for this sender within TTL
-        ttl_hours = config("CONVERSATION_TTL_HOURS", default=24, cast=int)
-        tz = ZoneInfo(config("APP_TIMEZONE", default="America/Ciudad_Juarez"))
+        ttl_hours = _ttl_hours
+        tz = ZoneInfo(_app_timezone)
         now_local = datetime.now(tz)
         now = now_local.replace(tzinfo=None)
         ttl_cutoff = now - timedelta(hours=ttl_hours)
@@ -193,23 +229,22 @@ async def reply(request: Request, Body: str = Form(), db: Session = Depends(get_
 
                 if choice.finish_reason == "tool_calls":
                     # Append the assistant's tool-call message
-                    messages.append(choice.message)
+                    messages.append(_assistant_message_to_payload(choice.message))
                     # Execute each tool and append results
                     for tc in choice.message.tool_calls:
                         result = execute_tool(tc.function.name, tc.function.arguments, db)
                         logger.info(f"[{trace_id}] tool={tc.function.name} result={result[:120]}")
                         # After a successful create_reservation, store the guest's phone
+                        # and fire post-creation hooks as a background task.
                         if tc.function.name == "create_reservation":
                             try:
                                 result_dict = json.loads(result)
                                 rid = result_dict.get("reservation_id")
                                 if rid:
-                                    from sqlalchemy import text as _text
-                                    db.execute(
-                                        _text("UPDATE reservations SET guest_phone = :phone WHERE id = :id"),
-                                        {"phone": whatsapp_number, "id": rid},
+                                    attach_guest_phone(rid, whatsapp_number, db)
+                                    background_tasks.add_task(
+                                        _fire_hooks, rid, result_dict.get("slot_id", ""), db
                                     )
-                                    db.commit()
                             except Exception as _e:
                                 logger.error(f"[{trace_id}] Failed to write guest_phone: {_e}")
                         messages.append({

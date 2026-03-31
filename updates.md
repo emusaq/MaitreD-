@@ -4,18 +4,119 @@ This file is updated after every significant task. It is the authoritative recor
 
 ---
 
-## Current State (2026-03-26)
+## Current State (2026-03-30)
 
 **Status:** Pre-beta. Core WhatsApp → LLM → reservation flow is working. Staff portal is built. Security hardening is in place. Not yet deployed to production.
 
 **Next action required:**
-- Add Alembic for schema migrations
-- Rotate credentials (Twilio, OpenAI) — current `.env` was previously committed to git
+- Register WhatsApp Business templates in Twilio Console → set `TWILIO_CONFIRM/DENY/CANCEL_TEMPLATE_SID` in `.env`
+- Provision a Redis instance and set `REDIS_URL` in `.env` for production
 - Create at least one manager-role employee via `create_employee()` before demo
 
 ---
 
 ## Task Log
+
+---
+
+### 2026-03-30 — Staff portal red-flag audit + DB schema consistency coverage
+
+**What changed:**
+
+**`RED_FLAGS.md` (new):** Added a focused audit of repo risks, with the top staff-portal concern called out first: database schema drift between legacy databases and the columns current staff routes expect.
+
+**`database/schema_checks.py` (new):** Added a small schema inspection helper that validates the `reservations` and `reservation_settings` columns required by the staff portal.
+
+**`tests/test_db_schema_consistency.py` (new):** Added regression coverage for two paths:
+- healthy schema created from the ORM passes with no issues
+- legacy-like schema missing newer staff-portal columns is flagged clearly
+
+**Why:**
+- The staff portal depends on several newer reservation/settings columns. If a database was created before those columns existed, the portal can still fail even when current code is correct.
+
+---
+
+### 2026-03-30 — Fix fresh-database `manage.py` bootstrap failure
+
+**What changed:**
+
+**`alembic/versions/02b1ec5ab21e_initial_schema.py`:** Replaced the broken autogen-only migration body with a real bootstrap migration that calls `Base.metadata.create_all(..., checkfirst=True)` on upgrade and `drop_all(..., checkfirst=True)` on downgrade.
+
+**`database/connection.py`:** Switched `connect()` to derive its psycopg connection from the same `DATABASE_URL` config used by the ORM and Alembic, instead of a separate legacy `MAITRED_DB` default.
+
+**Why:**
+- The original revision only altered/indexed tables that already existed. On a fresh database, `manage.py` ran `alembic upgrade head`, no base tables were created, and seeding then failed with `relation "clients" does not exist`.
+- `manage.py` also had split-brain DB targeting risk: raw maintenance queries could hit a different database than Alembic/ORM seeding.
+
+---
+
+### 2026-03-30 — Alembic, quick wins, and ORM hardening
+
+**What changed:**
+
+**`requirements.txt`:** Added `alembic`, `redis`, `fakeredis`.
+
+**`alembic/` (new directory):** Initialized Alembic. `env.py` uses `python-decouple` + `DATABASE_URL` fallback (same logic as `models/models.py`) and imports `Base` from `models.models` for autogenerate support. First migration (`initial_schema`) generated and stamped on the existing DB — no DDL was applied to the live DB.
+
+**`models/models.py`:**
+- Added `Reservation` ORM model (table existed in DB from schema.py but had no ORM class — Alembic would have dropped it without this).
+- Added `server_default="'pending'"` to `Reservation.status` so raw SQL INSERTs that omit `status` work in both PostgreSQL and SQLite (tests).
+- Added `index=True` to `History.client_id` and `Note.history_id` (FK indexes, task 3c).
+- Added `ondelete="CASCADE"` to `History.client_id`, `Note.client_id`; `ondelete="SET NULL"` to `History.restaurant_id`, `History.employee_id`, `Note.employee_id` — matching schema.py's ON DELETE rules.
+- Added partial unique `Index` on `Message.external_message_id` with `postgresql_where=(isnot(None))` to preserve the idempotency constraint from schema.py.
+- Added `Index` import.
+
+**`mcp/mcp_server.py`:**
+- Migrated `@validator("date_iso")` → `@field_validator("date_iso")` with `@classmethod` (Pydantic v2).
+- Fixed `int | None` → `Optional[int]` for Python <3.10 compatibility.
+
+**`manage.py`:**
+- Added `--confirm` flag: `--reset` without `--confirm` now exits with an error message.
+- Replaced `initialize_database()` (raw SQL from schema.py) with `alembic_command.upgrade(cfg, "head")` — schema changes are now migration-tracked.
+- Added `sys` import; added `_alembic_cfg()` helper.
+
+**`staff/app.py`:**
+- Replaced hardcoded `secure=False` on session cookie with `secure=_secure_cookies` (reads `SECURE_COOKIES` env var, defaults to `true`).
+
+**Test results:** 12/12 pass.
+
+**Residual notes:**
+- `ResourceWarning: unclosed database` in MCP async tests is a pre-existing SQLAlchemy/SQLite cleanup issue in the test harness — not a test failure.
+- The initial Alembic migration records ORM-vs-DB divergence (TEXT vs String types, index name differences). These are cosmetic no-ops on PostgreSQL. Future schema changes should be made via `alembic revision --autogenerate` only.
+- `database/schema.py` is now archived — kept for reference only, no longer used by `manage.py`.
+
+---
+
+### 2026-03-30 — Redis rate limiter + WhatsApp Business API template support
+
+**What changed:**
+
+**`rate_limiter.py` (rewritten):**
+- Redis sorted-set sliding window when `REDIS_URL` is set. Key = `rate:{sha256(phone)[:16]}` — PII-safe. Two-pipeline approach: read count, then conditionally write. TTL set on each key to prevent unbounded Redis memory growth. Fails open (allows request) if Redis is unreachable.
+- In-memory `defaultdict(deque)` fallback preserved for local dev without Redis.
+- Added `_set_redis_client()` for test injection.
+- Logs a startup warning when `REDIS_URL` is not set.
+
+**`utils.py`:**
+- Added `send_template_message(to_number, template_sid, template_variables)` using Twilio Content API (`content_sid` + `content_variables`). Follows the same return/log pattern as `send_message()`.
+- Added module-level reads for `TWILIO_CONFIRM/DENY/CANCEL_TEMPLATE_SID`.
+- Added `json` and `Optional` imports.
+
+**`staff/app.py`:**
+- `confirm_reservation`, `deny_reservation`, `cancel_reservation` now use `send_template_message()` when a template SID is configured. Falls back to `send_message()` with a warning log when not configured.
+- For deny/cancel, the custom message (or settings default) is passed as template variable `"1"`.
+- Module-level reads for the three template SID env vars added.
+
+**`tests/test_rate_limiter.py` (new):**
+- 6 tests covering Redis path (fakeredis) and in-memory fallback. Includes window-expiry test using `time.sleep(1.1)` + `flushall()`.
+
+**`.env.example` (new):** Full reference for all env vars including new `REDIS_URL` and `TWILIO_*_TEMPLATE_SID`.
+
+**Test results:** 18/18 pass.
+
+**Action required before going live:**
+- Register three WhatsApp message templates in Twilio Console (confirm / deny / cancel), get their Content SIDs, set as env vars.
+- Provision a Redis instance (Upstash, Railway, or Heroku Redis) and set `REDIS_URL`.
 
 ---
 

@@ -215,6 +215,7 @@ SELECT id, channel, external_user_id, status, updated_at FROM conversations ORDE
 ## Current Problems
 
 ### High priority
+0. **Staff portal can fail on legacy DB schema** — Staff routes now assume newer `reservations` and `reservation_settings` columns exist. Older databases missing these columns will break `/staff/`, `/staff/reservations`, or confirm/deny/cancel flows. Regression coverage added in `tests/test_db_schema_consistency.py`, but deployed DBs still need verification.
 1. **Dual schema sources** — `database/schema.py` (raw SQL) and `models/models.py` (ORM) can silently diverge. No Alembic. Any schema change must be made in both places manually.
 2. **No Alembic migrations** — schema changes require `manage.py --reset` (data loss) or manual `ALTER TABLE`. This is not viable for production data.
 3. **In-memory rate limiter** — `rate_limiter.py` uses a Python dict. Restarting the server resets all windows. Not suitable for multi-process or multi-instance deployments.
@@ -240,18 +241,20 @@ SELECT id, channel, external_user_id, status, updated_at FROM conversations ORDE
 ## Suggested Next Changes
 
 ### Immediate (before wider beta use)
-- [ ] Add Alembic for schema migrations (`alembic init`, generate first migration from current models)
-- [ ] Move rate limiter to Redis for multi-process safety (`redis-py`, `fakeredis` for tests)
-- [ ] Set `secure=True` on session cookie (requires HTTPS in production)
+- [x] Add Alembic for schema migrations — **DONE 2026-03-30**
+- [x] Rotate Twilio + OpenAI credentials (previously committed to git) — **DONE 2026-03-30**
+- [x] Migrate to WhatsApp Business API (Option A: Twilio WhatsApp Business sender; template support added) — **DONE 2026-03-30** — still need to register templates in Meta/Twilio console and set `TWILIO_*_TEMPLATE_SID` env vars
+- [x] Move rate limiter to Redis for multi-process safety — **DONE 2026-03-30**
+- [x] Set `secure=True` on session cookie via `SECURE_COOKIES` env var — **DONE 2026-03-30**
 - [ ] Remove unused `StaticFiles` import from `webapp.py`
 - [ ] Force-reset passwords for any employees seeded before bcrypt was added
 - [ ] Remove `psycopg` from `constraints.txt` (standardize on `psycopg2-binary`)
 
 ### Short-term
-- [ ] Migrate Pydantic `@validator` to `@field_validator` in `mcp/mcp_server.py`
+- [x] Migrate Pydantic `@validator` to `@field_validator` in `mcp/mcp_server.py` — **DONE 2026-03-30**
+- [x] Add `--confirm` flag to `manage.py --reset` — **DONE 2026-03-30**
+- [x] Add FK indexes to `history.client_id` and `notes.history_id` — **DONE 2026-03-30**
 - [ ] Add Sentry error monitoring (`sentry-sdk[fastapi]`)
-- [ ] Add `--confirm` flag to `manage.py --reset`
-- [ ] Add FK indexes to `history.client_id` and `notes.history_id`
 - [ ] Per-restaurant reservation settings (use `restaurant_id` filter in MCP tools)
 - [ ] Blackout dates table + UI in staff settings
 

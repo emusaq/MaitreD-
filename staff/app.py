@@ -1,14 +1,20 @@
 """Front-of-house staff webapp router."""
-from datetime import date, datetime
+from datetime import date, datetime, time as dt_time
 from typing import Optional
 
-from fastapi import APIRouter, Request, Depends, Form, HTTPException
+from fastapi import APIRouter, Request, Depends, Form, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from models.models import get_db, ReservationSettings, Client
-from utils import send_message, logger
+from models.reservation import (
+    get_reservations_for_date,
+    get_reservations_for_date_simple,
+    get_reservation_by_id,
+    update_reservation_status,
+)
+from utils import send_message, send_template_message, logger
 from staff.auth import (
     get_current_employee,
     require_manager,
@@ -16,14 +22,38 @@ from staff.auth import (
     authenticate,
     COOKIE_NAME,
 )
-from sqlalchemy import text
 
 import os
+from config import (
+    SECURE_COOKIES as _secure_cookies,
+    TWILIO_CONFIRM_TEMPLATE_SID as _confirm_template_sid,
+    TWILIO_DENY_TEMPLATE_SID as _deny_template_sid,
+    TWILIO_CANCEL_TEMPLATE_SID as _cancel_template_sid,
+)
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 templates = Jinja2Templates(directory=_TEMPLATE_DIR)
 
 router = APIRouter(prefix="/staff")
+
+
+def _format_time(value) -> str:
+    if hasattr(value, "strftime"):
+        return value.strftime("%H:%M")
+    return str(value)
+
+
+def _format_date(value) -> str:
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def _should_set_secure_cookie(request: Request) -> bool:
+    if not _secure_cookies:
+        return False
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
+    return request.url.scheme == "https" or forwarded_proto == "https"
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +85,7 @@ async def login(
         value=token,
         httponly=True,
         samesite="lax",
-        secure=False,  # Set True in production (HTTPS)
+        secure=_should_set_secure_cookie(request),
         max_age=60 * 60 * 8,
     )
     return response
@@ -79,23 +109,13 @@ async def dashboard(
     db: Session = Depends(get_db),
 ):
     today = date.today().isoformat()
-    rows = db.execute(
-        text("""
-            SELECT r.id, r.slot_id, r.time_24h::text, r.party_size,
-                   c.first_name, c.last_name, r.status, r.guest_name
-            FROM reservations r
-            LEFT JOIN clients c ON c.client_id = r.client_id
-            WHERE r.date_iso = :today
-            ORDER BY r.time_24h
-        """),
-        {"today": today},
-    ).fetchall()
+    rows = get_reservations_for_date_simple(today, db)
 
     reservations = [
         {
             "id": row[0],
             "slot_id": row[1],
-            "time_24h": row[2],
+            "time_24h": _format_time(row[2]),
             "party_size": row[3],
             "client_name": f"{row[4]} {row[5]}" if row[4] else (row[7] or "Walk-in"),
             "status": row[6] or "pending",
@@ -134,24 +154,14 @@ async def reservation_list(
     db: Session = Depends(get_db),
 ):
     target_date = date_filter or date.today().isoformat()
-    rows = db.execute(
-        text("""
-            SELECT r.id, r.slot_id, r.date_iso::text, r.time_24h::text, r.party_size,
-                   r.note, c.first_name, c.last_name, r.status, r.guest_name, r.occasion
-            FROM reservations r
-            LEFT JOIN clients c ON c.client_id = r.client_id
-            WHERE r.date_iso = :d
-            ORDER BY r.time_24h
-        """),
-        {"d": target_date},
-    ).fetchall()
+    rows = get_reservations_for_date(target_date, db)
 
     reservations = [
         {
             "id": row[0],
             "slot_id": row[1],
-            "date_iso": row[2],
-            "time_24h": row[3],
+            "date_iso": _format_date(row[2]),
+            "time_24h": _format_time(row[3]),
             "party_size": row[4],
             "note": row[5],
             "client_name": f"{row[6]} {row[7]}" if row[6] else (row[9] or "Walk-in"),
@@ -185,24 +195,22 @@ async def confirm_reservation(
     session: dict = Depends(get_current_employee),
     db: Session = Depends(get_db),
 ):
-    row = db.execute(
-        text("SELECT guest_phone FROM reservations WHERE id = :id"),
-        {"id": reservation_id},
-    ).fetchone()
-    if row is None:
+    reservation = get_reservation_by_id(reservation_id, db)
+    if reservation is None:
         raise HTTPException(status_code=404, detail="Reservation not found.")
 
-    db.execute(
-        text("UPDATE reservations SET status = 'confirmed' WHERE id = :id"),
-        {"id": reservation_id},
-    )
-    db.commit()
+    update_reservation_status(reservation_id, "confirmed", db)
 
     settings_row = db.query(ReservationSettings).first()
     confirm_msg = settings_row.confirm_message if settings_row else "Your reservation at Garufa has been confirmed. We look forward to welcoming you."
-    guest_phone = row[0]
+    guest_phone = reservation.guest_phone
     if guest_phone:
-        sid = send_message(guest_phone, confirm_msg)
+        if _confirm_template_sid:
+            sid = send_template_message(guest_phone, _confirm_template_sid)
+        else:
+            # No template configured — fall back to free-form (requires active 24h session)
+            logger.warning(f"confirm_reservation id={reservation_id}: TWILIO_CONFIRM_TEMPLATE_SID not set, falling back to send_message")
+            sid = send_message(guest_phone, confirm_msg)
         if sid is None:
             logger.warning(f"confirm_reservation id={reservation_id}: notification send failed (no SID returned)")
 
@@ -216,22 +224,23 @@ async def deny_reservation(
     session: dict = Depends(get_current_employee),
     db: Session = Depends(get_db),
 ):
-    row = db.execute(
-        text("SELECT guest_phone FROM reservations WHERE id = :id"),
-        {"id": reservation_id},
-    ).fetchone()
-    if row is None:
+    reservation = get_reservation_by_id(reservation_id, db)
+    if reservation is None:
         raise HTTPException(status_code=404, detail="Reservation not found.")
 
-    db.execute(
-        text("UPDATE reservations SET status = 'denied' WHERE id = :id"),
-        {"id": reservation_id},
-    )
-    db.commit()
+    update_reservation_status(reservation_id, "denied", db)
 
-    guest_phone = row[0]
-    if guest_phone and custom_message.strip():
-        sid = send_message(guest_phone, custom_message.strip())
+    guest_phone = reservation.guest_phone
+    if guest_phone:
+        settings_row = db.query(ReservationSettings).first()
+        msg = custom_message.strip() or (settings_row.deny_message if settings_row else "")
+        if _deny_template_sid:
+            # Pass custom_message as template variable "1" if provided
+            variables = {"1": msg} if msg else None
+            sid = send_template_message(guest_phone, _deny_template_sid, variables)
+        else:
+            logger.warning(f"deny_reservation id={reservation_id}: TWILIO_DENY_TEMPLATE_SID not set, falling back to send_message")
+            sid = send_message(guest_phone, msg) if msg else None
         if sid is None:
             logger.warning(f"deny_reservation id={reservation_id}: notification send failed (no SID returned)")
 
@@ -245,22 +254,22 @@ async def cancel_reservation(
     session: dict = Depends(get_current_employee),
     db: Session = Depends(get_db),
 ):
-    row = db.execute(
-        text("SELECT guest_phone FROM reservations WHERE id = :id"),
-        {"id": reservation_id},
-    ).fetchone()
-    if row is None:
+    reservation = get_reservation_by_id(reservation_id, db)
+    if reservation is None:
         raise HTTPException(status_code=404, detail="Reservation not found.")
 
-    db.execute(
-        text("UPDATE reservations SET status = 'cancelled' WHERE id = :id"),
-        {"id": reservation_id},
-    )
-    db.commit()
+    update_reservation_status(reservation_id, "cancelled", db)
 
-    guest_phone = row[0]
-    if guest_phone and custom_message.strip():
-        sid = send_message(guest_phone, custom_message.strip())
+    guest_phone = reservation.guest_phone
+    if guest_phone:
+        settings_row = db.query(ReservationSettings).first()
+        msg = custom_message.strip() or (settings_row.cancel_message if settings_row else "")
+        if _cancel_template_sid:
+            variables = {"1": msg} if msg else None
+            sid = send_template_message(guest_phone, _cancel_template_sid, variables)
+        else:
+            logger.warning(f"cancel_reservation id={reservation_id}: TWILIO_CANCEL_TEMPLATE_SID not set, falling back to send_message")
+            sid = send_message(guest_phone, msg) if msg else None
         if sid is None:
             logger.warning(f"cancel_reservation id={reservation_id}: notification send failed (no SID returned)")
 
@@ -274,6 +283,7 @@ async def cancel_reservation(
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(
     request: Request,
+    saved: bool = Query(default=False),
     session: dict = Depends(get_current_employee),
     db: Session = Depends(get_db),
 ):
@@ -281,13 +291,12 @@ async def settings_page(
     settings = db.query(ReservationSettings).first()
     return templates.TemplateResponse(
         "settings.html",
-        {"request": request, "settings": settings, "session": session, "saved": False},
+        {"request": request, "settings": settings, "session": session, "saved": saved},
     )
 
 
 @router.post("/settings")
 async def update_settings(
-    request: Request,
     reservations_enabled: bool = Form(default=False),
     open_from: str = Form(),
     open_to: str = Form(),
@@ -310,9 +319,13 @@ async def update_settings(
         settings = ReservationSettings()
         db.add(settings)
 
+    # Parse time strings ("HH:MM" or "HH:MM:SS") into datetime.time objects
+    h, m = open_from.split(":")[:2]
+    settings.open_from = dt_time(int(h), int(m))
+    h, m = open_to.split(":")[:2]
+    settings.open_to = dt_time(int(h), int(m))
+
     settings.reservations_enabled = reservations_enabled
-    settings.open_from = open_from
-    settings.open_to = open_to
     settings.slot_interval = slot_interval
     settings.max_per_slot = max_per_slot
     settings.max_party_size = max_party_size
@@ -327,10 +340,28 @@ async def update_settings(
     settings.updated_at = datetime.utcnow()
     db.commit()
 
-    return templates.TemplateResponse(
-        "settings.html",
-        {"request": request, "settings": settings, "session": session, "saved": True},
-    )
+    return RedirectResponse(url="/staff/settings?saved=1", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Quick toggle reservations (dashboard shortcut)
+# ---------------------------------------------------------------------------
+
+@router.post("/toggle-reservations")
+async def toggle_reservations(
+    session: dict = Depends(get_current_employee),
+    db: Session = Depends(get_db),
+):
+    require_manager(session)
+    settings = db.query(ReservationSettings).first()
+    if settings is None:
+        settings = ReservationSettings()
+        db.add(settings)
+    settings.reservations_enabled = not settings.reservations_enabled
+    settings.updated_by = session.get("id")
+    settings.updated_at = datetime.utcnow()
+    db.commit()
+    return RedirectResponse(url="/staff/", status_code=303)
 
 
 # ---------------------------------------------------------------------------

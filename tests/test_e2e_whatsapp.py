@@ -1,3 +1,4 @@
+import itertools
 import unittest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -57,8 +58,9 @@ class E2EWhatsAppTests(unittest.TestCase):
                         return DummyOpenAIResponse("ok")
         web.client = MockClient()
 
-        # Mock Twilio send to avoid network calls
-        web.send_message = lambda to, body: "SM_TEST_FAKE"
+        # Mock Twilio send to avoid network calls; unique SIDs prevent UNIQUE constraint violations
+        _sid_counter = itertools.count(1)
+        web.send_message = lambda to, body: f"SM_TEST_{next(_sid_counter)}"
 
         self.client = TestClient(web.app)
 
@@ -107,6 +109,70 @@ class E2EWhatsAppTests(unittest.TestCase):
         count = db.query(Message).filter(Message.external_message_id == "SM_DUP").count()
         self.assertEqual(count, 1, "Duplicate SID must produce exactly one message record")
         db.close()
+
+    def test_tool_call_messages_are_serialized_for_follow_up_openai_calls(self):
+        from_number = "+15558887777"
+
+        class ToolCall:
+            def __init__(self):
+                self.id = "tc_1"
+                self.type = "function"
+
+                class Fn:
+                    name = "list_open_times"
+                    arguments = '{"date_iso": "2025-04-01", "party_size": 2}'
+
+                self.function = Fn()
+
+        class ToolCallMessage:
+            def __init__(self):
+                self.content = None
+                self.tool_calls = [ToolCall()]
+
+        class FinalMessage:
+            def __init__(self):
+                self.content = "Here are the available times."
+                self.tool_calls = None
+
+        class ToolCallResponse:
+            class Choice:
+                def __init__(self):
+                    self.message = ToolCallMessage()
+                    self.finish_reason = "tool_calls"
+
+            def __init__(self):
+                self.choices = [self.Choice()]
+
+        class FinalResponse:
+            class Choice:
+                def __init__(self):
+                    self.message = FinalMessage()
+                    self.finish_reason = "stop"
+
+            def __init__(self):
+                self.choices = [self.Choice()]
+
+        call_count = itertools.count(1)
+
+        class MockClient:
+            class chat:
+                class completions:
+                    @staticmethod
+                    def create(*args, **kwargs):
+                        if next(call_count) == 1:
+                            return ToolCallResponse()
+                        assert all(isinstance(message, dict) for message in kwargs["messages"])
+                        return FinalResponse()
+
+        web.client = MockClient()
+
+        response = self.client.post(
+            "/message",
+            data={"From": f"whatsapp:{from_number}", "Body": "Book a table", "MessageSid": "SM_TOOL"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "ok")
 
 
 if __name__ == '__main__':

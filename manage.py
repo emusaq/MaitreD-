@@ -1,11 +1,19 @@
 import argparse
 import importlib
+import sys
 from contextlib import closing
+from datetime import time as dt_time
+
+from alembic.config import Config as AlembicConfig
+from alembic import command as alembic_command
 
 from database.connection import connect
-from database.schema import initialize_database
 from models.models import SessionLocal, ReservationSettings, Employee
 from models.employees import hash_password
+
+
+def _alembic_cfg() -> AlembicConfig:
+    return AlembicConfig("alembic.ini")
 
 
 def is_initialized(conn) -> bool:
@@ -33,8 +41,8 @@ def seed_reservation_settings() -> None:
         if db.query(ReservationSettings).count() == 0:
             db.add(ReservationSettings(
                 reservations_enabled=True,
-                open_from="17:00",
-                open_to="21:00",
+                open_from=dt_time(17, 0),
+                open_to=dt_time(21, 0),
                 slot_interval=30,
                 max_per_slot=20,
                 max_party_size=8,
@@ -98,7 +106,16 @@ def main():
     parser.add_argument(
         "--reset", action="store_true", help="Wipe existing schema and re‑initialize."
     )
+    parser.add_argument(
+        "--confirm", action="store_true",
+        help="Required with --reset to confirm intentional data loss."
+    )
     args = parser.parse_args()
+
+    if args.reset and not args.confirm:
+        print("ERROR: --reset will DROP ALL DATA. Pass --confirm to proceed.")
+        print("       python manage.py --reset --confirm")
+        sys.exit(1)
 
     try:
         conn = connect()
@@ -106,23 +123,27 @@ def main():
 
         if args.reset:
             wipe_schema(conn)
-            initialize_database()
+            conn.close()
+            alembic_command.upgrade(_alembic_cfg(), "head")
             seed_reservation_settings()
             seed_test_employee()
             print("✅ Database reset & re‑initialized.")
         else:
             if not is_initialized(conn):
-                initialize_database()
+                conn.close()
+                alembic_command.upgrade(_alembic_cfg(), "head")
                 seed_reservation_settings()
                 seed_test_employee()
                 print("✅ Database initialized successfully.")
             else:
+                conn.close()
+                alembic_command.upgrade(_alembic_cfg(), "head")
+                seed_reservation_settings()
                 seed_test_employee()
-                print("ℹ️  Database already initialized — skipping schema setup.")
+                print("ℹ️  Database schema up to date.")
 
         run_basic_tests()
 
-        conn.close()
     except Exception as e:
         print(f"❌ Error: {e}")
 

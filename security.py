@@ -1,7 +1,7 @@
 """Security utilities: prompt injection detection and PII output filtering."""
 import re
-from decouple import config
 from utils import logger
+from config import INJECTION_REPLY, RESTAURANT_NAME, RESTAURANT_DESCRIPTION, CONCIERGE_TONE
 
 # --- Input sanitisation ---
 
@@ -23,11 +23,10 @@ _INJECTION_PATTERNS = [
 _COMPILED = [re.compile(p, re.IGNORECASE) for p in _INJECTION_PATTERNS]
 
 MAX_INPUT_LENGTH = 1000
-INJECTION_REPLY = config("INJECTION_REPLY", default="I can only help with reservations. How can I assist you?")
 
-_restaurant_name = config("RESTAURANT_NAME", default="Garufa")
-_restaurant_description = config("RESTAURANT_DESCRIPTION", default="a distinguished Argentine steakhouse")
-_concierge_tone = config("CONCIERGE_TONE", default="warm, polished, and attentive")
+_restaurant_name = RESTAURANT_NAME
+_restaurant_description = RESTAURANT_DESCRIPTION
+_concierge_tone = CONCIERGE_TONE
 
 
 def check_injection(text: str) -> bool:

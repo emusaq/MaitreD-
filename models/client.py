@@ -1,3 +1,4 @@
+import uuid
 from typing import List, Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -41,9 +42,11 @@ def create_client(
     preferred_server: Optional[str] = None,
     preferred_communication: Optional[str] = None,
     allow_marketing: bool = True,
-    db = Session
+    db: Optional[Session] = None,
 ) -> int:
     """Create a client and return their client_id."""
+    if db is None:
+        db = SessionLocal()
     new_client = Client(
         first_name=first_name,
         last_name=last_name,
@@ -79,7 +82,8 @@ def get_or_create_client_id(db: Session, client_name: str) -> int:
     client = get_client_by_name(first_name, last_name, db)
     if client:
         return client.client_id
-    dummy_phone = "000" + str(abs(hash(client_name)) % 10000000000)
+    # uuid.uuid5 is deterministic across Python restarts (unlike hash())
+    dummy_phone = "000" + str(uuid.uuid5(uuid.NAMESPACE_OID, client_name).int % 10000000000)
     return create_client(first_name, last_name, dummy_phone, db=db)
 
 

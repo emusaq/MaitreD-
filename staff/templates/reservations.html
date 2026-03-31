@@ -62,9 +62,7 @@
       <td>{{ r.note or "—" }}</td>
       <td class="actions-cell">
         {% if r.status == 'pending' %}
-          <form method="post" action="/staff/reservations/{{ r.id }}/confirm" onsubmit="return confirm('Confirm this reservation?')">
-            <button type="submit" class="btn btn-primary btn-sm">Confirm</button>
-          </form>
+          <button type="button" onclick="document.getElementById('confirm-modal-{{ r.id }}').showModal()" class="btn btn-primary btn-sm">Confirm</button>
           <button type="button" onclick="document.getElementById('deny-modal-{{ r.id }}').showModal()" class="btn btn-warning btn-sm">Deny</button>
           <button type="button" onclick="document.getElementById('cancel-modal-{{ r.id }}').showModal()" class="btn btn-danger btn-sm">Cancel</button>
         {% elif r.status == 'confirmed' %}
@@ -81,6 +79,20 @@
   {% if r.status in ('pending', 'confirmed') %}
 
   {% if r.status == 'pending' %}
+  <dialog id="confirm-modal-{{ r.id }}">
+    <h3>Confirm Reservation</h3>
+    <p style="font-size:.9rem;color:#555;margin-bottom:1rem;">
+      Confirm <strong>{{ r.guest_name or r.client_name }}</strong> &mdash;
+      {{ r.date_iso }}&nbsp;at&nbsp;{{ r.time_24h }}, party of {{ r.party_size }}?
+    </p>
+    <form method="post" action="/staff/reservations/{{ r.id }}/confirm">
+      <div class="dialog-actions">
+        <button type="button" onclick="this.closest('dialog').close()" class="btn">Back</button>
+        <button type="submit" class="btn btn-primary">Confirm &amp; Notify</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="deny-modal-{{ r.id }}">
     <h3>Send Denial Message</h3>
     <form method="post" action="/staff/reservations/{{ r.id }}/deny">

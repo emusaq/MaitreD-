@@ -2,12 +2,10 @@
 from typing import Optional
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from fastapi import Request, HTTPException
-from decouple import config
 
-from models.employees import get_employee_by_username, verify_password
+from models.employees import get_employee_by_username, verify_password, hash_password
 from models.models import Employee, SessionLocal
-
-_SECRET_KEY = config("SECRET_KEY", default="change-me-in-production")
+from config import SECRET_KEY as _SECRET_KEY
 _serializer = URLSafeTimedSerializer(_SECRET_KEY)
 _COOKIE_NAME = "maitred_session"
 _SESSION_MAX_AGE = 60 * 60 * 8  # 8 hours
@@ -29,7 +27,14 @@ def authenticate(username: str, password: str) -> Optional[Employee]:
     db = SessionLocal()
     try:
         employee = get_employee_by_username(username, db)
-        if employee and verify_password(password, employee.password):
+        if employee is None or not password:
+            return None
+        if verify_password(password, employee.password):
+            return employee
+        if employee.password == password:
+            employee.password = hash_password(password)
+            db.commit()
+            db.refresh(employee)
             return employee
         return None
     finally:

@@ -2,6 +2,7 @@ import unittest
 import os
 os.environ["SQLALCHEMY_CREATE_ALL"] = "0"
 import asyncio
+from datetime import time as dt_time
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
@@ -110,8 +111,8 @@ class MCPToolsTests(unittest.TestCase):
         # Insert custom settings: max_per_slot=4, so two party-of-3 requests can't both succeed
         settings = ReservationSettings(
             reservations_enabled=True,
-            open_from="17:00",
-            open_to="21:00",
+            open_from=dt_time(17, 0),
+            open_to=dt_time(21, 0),
             slot_interval=30,
             max_per_slot=4,
             max_party_size=8,
@@ -136,8 +137,8 @@ class MCPToolsTests(unittest.TestCase):
         """Multiple bookings are allowed as long as combined party_size stays under max_per_slot."""
         settings = ReservationSettings(
             reservations_enabled=True,
-            open_from="17:00",
-            open_to="21:00",
+            open_from=dt_time(17, 0),
+            open_to=dt_time(21, 0),
             slot_interval=30,
             max_per_slot=10,
             max_party_size=8,
