@@ -62,7 +62,7 @@ def _should_set_secure_cookie(request: Request) -> bool:
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, error: str = ""):
-    return templates.TemplateResponse("login.html", {"request": request, "error": error})
+    return templates.TemplateResponse(request, "login.html", {"error": error})
 
 
 @router.post("/login")
@@ -74,8 +74,9 @@ async def login(
     employee = authenticate(username, password)
     if employee is None:
         return templates.TemplateResponse(
+            request,
             "login.html",
-            {"request": request, "error": "Invalid username or password."},
+            {"error": "Invalid username or password."},
             status_code=401,
         )
     token = create_session_cookie(employee.employee_id, employee.role)
@@ -129,9 +130,9 @@ async def dashboard(
     reservations_enabled = settings.reservations_enabled if settings else True
 
     return templates.TemplateResponse(
+        request,
         "dashboard.html",
         {
-            "request": request,
             "today": today,
             "reservations": reservations,
             "total_covers": total_covers,
@@ -177,9 +178,9 @@ async def reservation_list(
     cancel_message = settings_row.cancel_message if settings_row else ""
 
     return templates.TemplateResponse(
+        request,
         "reservations.html",
         {
-            "request": request,
             "reservations": reservations,
             "date_filter": target_date,
             "deny_message": deny_message,
@@ -290,8 +291,9 @@ async def settings_page(
     require_manager(session)
     settings = db.query(ReservationSettings).first()
     return templates.TemplateResponse(
+        request,
         "settings.html",
-        {"request": request, "settings": settings, "session": session, "saved": saved},
+        {"settings": settings, "session": session, "saved": saved},
     )
 
 
@@ -379,6 +381,7 @@ async def client_profile(
     if client is None:
         raise HTTPException(status_code=404, detail="Client not found.")
     return templates.TemplateResponse(
+        request,
         "client.html",
-        {"request": request, "client": client, "session": session},
+        {"client": client, "session": session},
     )
